@@ -47,7 +47,7 @@ Issues = "https://github.com/jblane1000/magwave/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-magwave = ["py.typed"]
+magwave = ["py.typed", "benchmarks/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -57,6 +57,9 @@ addopts = "-q"
 line-length = 100
 target-version = "py311"
 src = ["src", "tests", "tools"]
+# docs/ holds illustrative snippets inside prose and the research reference file, which is
+# research-owned and not reformatted by tooling; the lint section already exempts it.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

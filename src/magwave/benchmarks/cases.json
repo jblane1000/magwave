@@ -1,0 +1,804 @@
+{
+  "cases": [
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "m1",
+          "type": "dipole"
+        }
+      ],
+      "description": "Point dipole m = (0,0,1) A m^2 at the origin, field point 0.5 m along the axis. Hand-derived: Bz = mu0/(4pi)*(3*0.5/0.5^5 - 1/0.5^3) = mu0/(4pi)*16 = 1.6e-6 T.",
+      "expected": [
+        {
+          "check": "dipole_B",
+          "quantity": "Bz",
+          "source": "exact closed form, hand-derived in the research dossier note (a)",
+          "tolerance": 1e-09,
+          "unit": "T",
+          "value": 1.6e-06
+        }
+      ],
+      "name": "dipole_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            0.5
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (a) dipole_B",
+        "docs/research/validation-sources.md (a): Jackson 5.5"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "m1",
+          "type": "dipole"
+        }
+      ],
+      "description": "Same dipole at (0.3, 0, 0.4) m: the transverse component. Hand-derived Bx = mu0/(4pi)*3*0.4*0.3/0.5^5 = 1.152e-6 T.",
+      "expected": [
+        {
+          "check": "dipole_B",
+          "quantity": "Bx",
+          "source": "exact closed form, hand-derived in the research dossier note (a)",
+          "tolerance": 1e-09,
+          "unit": "T",
+          "value": 1.152e-06
+        }
+      ],
+      "name": "dipole_offaxis_Bx",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.3,
+            0.0,
+            0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (a) dipole_B",
+        "docs/research/validation-sources.md (a)"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "m1",
+          "type": "dipole"
+        }
+      ],
+      "description": "Same dipole at (0.3, 0, 0.4) m: the axial component. Hand-derived Bz = mu0/(4pi)*(3*0.4*0.4/0.5^5 - 1/0.5^3) = 7.36e-7 T.",
+      "expected": [
+        {
+          "check": "dipole_B",
+          "quantity": "Bz",
+          "source": "exact closed form, hand-derived in the research dossier note (a)",
+          "tolerance": 1e-09,
+          "unit": "T",
+          "value": 7.36e-07
+        }
+      ],
+      "name": "dipole_offaxis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.3,
+            0.0,
+            0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (a) dipole_B",
+        "docs/research/validation-sources.md (a)"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "radius": 1.0
+          },
+          "kind": "loop",
+          "name": "l1",
+          "turns": 1,
+          "type": "coil"
+        }
+      ],
+      "description": "Single 1 m-radius loop carrying 1 A, field point at its centre: Bz = mu0*I/(2a) = mu0/2.",
+      "expected": [
+        {
+          "check": "loop_B",
+          "quantity": "Bz",
+          "source": "exact on-axis closed form mu0*I/(2a); validation table (b) 1e-10",
+          "tolerance": 1e-10,
+          "unit": "T",
+          "value": 6.283185307179586e-07
+        }
+      ],
+      "name": "loop_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (b) loop_B on-axis branch",
+        "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
+      ],
+      "tolerance": 1e-10
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "radius": 1.0
+          },
+          "kind": "loop",
+          "name": "l1",
+          "turns": 1,
+          "type": "coil"
+        }
+      ],
+      "description": "Same loop at cylindrical (rho, z) = (0.3, 0.4) m: the axial component of the elliptic-integral form, captured from reference_formulas.py loop_B.",
+      "expected": [
+        {
+          "check": "loop_B",
+          "quantity": "Bz",
+          "source": "reference_formulas.py loop_B(1.0, 0.3, 0.4); validation table (b) 1e-10",
+          "tolerance": 1e-10,
+          "unit": "T",
+          "value": 5.106799344289345e-07
+        }
+      ],
+      "name": "loop_offaxis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.3,
+            0.0,
+            0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (b) loop_B",
+        "docs/research/validation-sources.md (b): verified 5.7e-14 vs a 60 000-segment Biot-Savart reference"
+      ],
+      "tolerance": 1e-10
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "radius": 1.0
+          },
+          "kind": "loop",
+          "name": "l1",
+          "turns": 1,
+          "type": "coil"
+        }
+      ],
+      "description": "Same loop at (0.3, 0.4) m: the radial component. At y = 0, x > 0 the radial direction is +x, so this is the Cartesian Bx.",
+      "expected": [
+        {
+          "check": "loop_B",
+          "quantity": "B_rho",
+          "source": "reference_formulas.py loop_B(1.0, 0.3, 0.4); validation table (b) 1e-10",
+          "tolerance": 1e-10,
+          "unit": "T",
+          "value": 8.611335230253824e-08
+        }
+      ],
+      "name": "loop_offaxis_Brho",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.3,
+            0.0,
+            0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (b) loop_B",
+        "docs/research/validation-sources.md (b)"
+      ],
+      "tolerance": 1e-10
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "inner_radius": 1.0,
+            "length": 4.0,
+            "outer_radius": 1.0
+          },
+          "kind": "solenoid",
+          "name": "w1",
+          "turns": 400,
+          "type": "coil"
+        }
+      ],
+      "description": "Thin-walled solenoid R = 1 m, winding over z in [-2, 2] m, 400 turns at 1 A (ampere-turn density nI = 100 A), field point at the centre.",
+      "expected": [
+        {
+          "check": "thin_solenoid_Bz",
+          "quantity": "Bz",
+          "source": "research check 'thin solenoid centre field', tol 1e-12 vs mu0*nI*(2/sqrt5)",
+          "tolerance": 1e-12,
+          "unit": "T",
+          "value": 0.00011239703569665162
+        }
+      ],
+      "name": "thin_solenoid_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (c) thin_solenoid_Bz, check 'thin solenoid centre field'",
+        "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
+      ],
+      "tolerance": 1e-12
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 500.0,
+          "dims": {
+            "inner_radius": 0.5,
+            "length": 2.0,
+            "outer_radius": 1.5
+          },
+          "kind": "solenoid",
+          "name": "w1",
+          "turns": 4000,
+          "type": "coil"
+        }
+      ],
+      "description": "Volume winding, R1 = 0.5 m, R2 = 1.5 m, z in [-1, 1] m, 4000 turns at 500 A (J = 1e6 A/m^2), field point at the centre. Expected value is the independent ring-slice sum, not the closed form under test.",
+      "expected": [
+        {
+          "check": "thick_solenoid_Bz",
+          "quantity": "Bz",
+          "source": "research check 'thick solenoid vs ring-slice sum', tol 1e-4 (reference is quadrature-limited; the closed form is machine precision)",
+          "tolerance": 0.0001,
+          "unit": "T",
+          "value": 0.8966736445247395
+        }
+      ],
+      "name": "thick_solenoid_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (c) thick_solenoid_Bz vs _thick_loopsum",
+        "docs/research/validation-sources.md (c): 60-slice ring sum, 1.6e-6 relative"
+      ],
+      "tolerance": 0.0001
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            1.4
+          ],
+          "demag_curve": null,
+          "dims": {
+            "size_x": 1.0,
+            "size_y": 0.6,
+            "size_z": 0.8
+          },
+          "kind": "cuboid",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Uniformly magnetised cuboid 1.0 x 0.6 x 0.8 m, M = 8e5 A/m along +z, centred at (0, 0, 1.4) m; field point 1.2 m above the top face. Expected value is the 800x800 charged-face quadrature, not the eight-corner form under test.",
+      "expected": [
+        {
+          "check": "cuboid_B",
+          "quantity": "Bz",
+          "source": "cuboid_B_numeric at 800x800 per face; validation table (d) 1e-6",
+          "tolerance": 1e-06,
+          "unit": "T",
+          "value": 0.01837860868280891
+        }
+      ],
+      "name": "cuboid_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            3.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
+        "docs/research/validation-sources.md (d): Engel-Herbert & Hesjedal 2005"
+      ],
+      "tolerance": 1e-06
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            1.4
+          ],
+          "demag_curve": null,
+          "dims": {
+            "size_x": 1.0,
+            "size_y": 0.6,
+            "size_z": 0.8
+          },
+          "kind": "cuboid",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Same cuboid, off-axis point (0.6, 0.2, 2.5) m: the transverse component, where the corner-sum cancellation is hardest.",
+      "expected": [
+        {
+          "check": "cuboid_B",
+          "quantity": "Bx",
+          "source": "cuboid_B_numeric at 800x800 per face; validation table (d) 1e-6",
+          "tolerance": 1e-06,
+          "unit": "T",
+          "value": 0.021946891344328204
+        }
+      ],
+      "name": "cuboid_transverse_Bx",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.6,
+            0.2,
+            2.5
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
+        "docs/research/validation-sources.md (d)"
+      ],
+      "tolerance": 1e-06
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            1.4
+          ],
+          "demag_curve": null,
+          "dims": {
+            "size_x": 1.0,
+            "size_y": 0.6,
+            "size_z": 0.8
+          },
+          "kind": "cuboid",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Same cuboid, interior point (0.1, 0.05, 1.4) m. The eight-corner form must return the true B inside the body, i.e. the charge field plus the +mu0*M jump exactly once.",
+      "expected": [
+        {
+          "check": "cuboid_B",
+          "quantity": "Bz",
+          "source": "research check 'cuboid interior Bz', tol 1e-5 vs quadrature + mu0*M",
+          "tolerance": 1e-05,
+          "unit": "T",
+          "value": 0.7005010116178249
+        }
+      ],
+      "name": "cuboid_interior_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.1,
+            0.05,
+            1.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (d) check 'cuboid interior Bz'",
+        "docs/research/validation-sources.md (d): atan2 branch carries the jump"
+      ],
+      "tolerance": 1e-05
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 2.0,
+            "radius": 1.0
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Uniformly magnetised cylinder R = 1 m, z in [-1, 1] m, M = 8e5 A/m along +z, field point at the centre: Bz = mu0*M*sqrt(2)/2.",
+      "expected": [
+        {
+          "check": "cylinder_Bz_axis",
+          "quantity": "Bz",
+          "source": "research check 'cylinder on-axis (z=0)', tol 1e-12 vs mu0*M*sqrt2/2",
+          "tolerance": 1e-12,
+          "unit": "T",
+          "value": 0.7108612701053386
+        }
+      ],
+      "name": "cylinder_axis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (e) cylinder_Bz_axis and check 'cylinder on-axis (z=0)'",
+        "docs/research/validation-sources.md (e): Derby & Olbert 2010; Caciagli 2018"
+      ],
+      "tolerance": 1e-12
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "demag_curve": null,
+          "dims": {
+            "inner_radius": 1.0,
+            "outer_radius": 2.718281828459045
+          },
+          "kind": "halbach_cylinder",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Infinite k = 1 Halbach cylinder, Br = 1 T, Ri = 1 m, Ro = e m, so the ideal bore field is Br*ln(Ro/Ri) = 1 T, uniform and transverse. Any bore point gives the same magnitude, so the probe point at the axis is arbitrary.",
+      "expected": [
+        {
+          "check": "halbach_bore_ideal",
+          "quantity": "|B|",
+          "source": "research check 'bore field magnitude ... equals ln(Ro/Ri)', tol 3e-3; validation table (f) allows 2 % vs Br*ln(Ro/Ri)",
+          "tolerance": 0.003,
+          "unit": "T",
+          "value": 1.0
+        }
+      ],
+      "name": "halbach_bore_B",
+      "probes": [
+        {
+          "component": "magnitude",
+          "point": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (f) halbach_bore_ideal and the 2-D bound-current verification",
+        "docs/research/validation-sources.md (f): Halbach 1980; Bjork 2008"
+      ],
+      "tolerance": 0.003
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.2
+          ],
+          "center": [
+            0.0,
+            0.0,
+            -0.01
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 0.02,
+            "radius": 0.005
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        },
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.2
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.41
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 0.02,
+            "radius": 0.005
+          },
+          "kind": "cylinder",
+          "name": "m2",
+          "type": "magnet"
+        }
+      ],
+      "description": "Two identical coaxial cylinders (Br = 1.2 T, R = 5 mm, L = 20 mm) with a 400 mm gap (g = 20 L): the dipole approximation against the exact charge-model force. Expected value is the exact numeric force, and the dipole form is systematically low by 0.31 % here.",
+      "expected": [
+        {
+          "check": "F_dipole_coaxial",
+          "quantity": "|F|",
+          "source": "F_facepair_numeric at g = 20 L (exact charge model); research tol 1e-2",
+          "tolerance": 0.01,
+          "unit": "N",
+          "value": 4.3518217061443674e-05
+        }
+      ],
+      "name": "force_dipole_coaxial_far",
+      "probes": [
+        {
+          "component": "magnitude",
+          "point": [
+            0.0,
+            0.0,
+            0.41
+          ],
+          "quantity": "F"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (g) check 'exact face-pair force, far limit g=20L'",
+        "docs/research/validation-sources.md (g): dipole valid within 2 % only for d >= ~10 L"
+      ],
+      "tolerance": 0.01
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.2
+          ],
+          "center": [
+            0.0,
+            0.0,
+            -0.01
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 0.02,
+            "radius": 0.005
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        },
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.2
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.11
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 0.02,
+            "radius": 0.005
+          },
+          "kind": "cylinder",
+          "name": "m2",
+          "type": "magnet"
+        }
+      ],
+      "description": "Same two magnets with a 100 mm gap (g = 5 L): the point-pole form against the exact charge-model force. The point-pole form over-estimates by 0.92 % here.",
+      "expected": [
+        {
+          "check": "F_pointpole_cylinders",
+          "quantity": "|F|",
+          "source": "F_facepair_numeric at g = 5 L (exact charge model); research tol 2e-2",
+          "tolerance": 0.02,
+          "unit": "N",
+          "value": 0.006762088510387287
+        }
+      ],
+      "name": "force_pointpole_g5L",
+      "probes": [
+        {
+          "component": "magnitude",
+          "point": [
+            0.0,
+            0.0,
+            0.11
+          ],
+          "quantity": "F"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (g) check 'exact force g=5L vs point-pole'",
+        "docs/research/validation-sources.md (g): point-pole valid within 2 % for g >= 3 L"
+      ],
+      "tolerance": 0.02
+    }
+  ],
+  "schema": "magwave.benchmarks/1"
+}
