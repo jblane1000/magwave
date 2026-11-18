@@ -20,8 +20,10 @@ import numpy as np
 
 from ..analytic import (
     F_dipole_coaxial,
+    F_dipoles_general,
     F_pointpole_cylinders,
     cuboid_B,
+    cylinder_B,
     cylinder_Bz_axis,
     dipole_B,
     halbach_bore_ideal,
@@ -150,6 +152,18 @@ def _thick_solenoid_Bz(case: Case) -> float:
     return _solenoid_Bz(case, "thick_solenoid_Bz", thick=True)
 
 
+def _cuboid_box(magnet: Magnet) -> tuple[float, float, float, float, float, float]:
+    half = {key: 0.5 * value for key, value in magnet.dims.items()}
+    return (
+        magnet.center[0] - half["size_x"],
+        magnet.center[0] + half["size_x"],
+        magnet.center[1] - half["size_y"],
+        magnet.center[1] + half["size_y"],
+        magnet.center[2] - half["size_z"],
+        magnet.center[2] + half["size_z"],
+    )
+
+
 @check("cuboid_B")
 def _cuboid_B(case: Case) -> float:
     magnet = _sole(case, Magnet, "cuboid_B")
@@ -161,17 +175,20 @@ def _cuboid_B(case: Case) -> float:
         "an off-axis remanence arrives with the M2 engine",
     )
     _require(bre_z != 0.0, f"{case.name}: br has no +z component")
-    half = {key: 0.5 * value for key, value in magnet.dims.items()}
-    box = (
-        magnet.center[0] - half["size_x"],
-        magnet.center[0] + half["size_x"],
-        magnet.center[1] - half["size_y"],
-        magnet.center[1] + half["size_y"],
-        magnet.center[2] - half["size_z"],
-        magnet.center[2] + half["size_z"],
-    )
     probe = _probe(case, "B")
-    return _pick(cuboid_B(bre_z / MU0, box, probe.point), probe.component, case)
+    return _pick(cuboid_B(bre_z / MU0, _cuboid_box(magnet), probe.point), probe.component, case)
+
+
+@check("cuboid_B_general")
+def _cuboid_B_general(case: Case) -> float:
+    magnet = _sole(case, Magnet, "cuboid_B_general")
+    _require(
+        magnet.kind == "cuboid", f"{case.name}: check 'cuboid_B_general' needs a cuboid magnet"
+    )
+    _require(any(c != 0.0 for c in magnet.br), f"{case.name}: br is zero")
+    m_vec = tuple(c / MU0 for c in magnet.br)
+    probe = _probe(case, "B")
+    return _pick(cuboid_B(m_vec, _cuboid_box(magnet), probe.point), probe.component, case)
 
 
 @check("cylinder_Bz_axis")
@@ -198,6 +215,37 @@ def _cylinder_Bz_axis(case: Case) -> float:
         magnet.br[2] / MU0,
         probe.point[2],
     )
+
+
+@check("cylinder_B")
+def _cylinder_B(case: Case) -> float:
+    magnet = _sole(case, Magnet, "cylinder_B")
+    _require(
+        magnet.kind == "cylinder",
+        f"{case.name}: check 'cylinder_B' needs a solid cylinder magnet",
+    )
+    _require(
+        magnet.br[0] == 0.0 and magnet.br[1] == 0.0 and magnet.br[2] != 0.0,
+        f"{case.name}: cylinder_B form is magnetisation along +z only",
+    )
+    probe = _probe(case, "B")
+    dx = probe.point[0] - magnet.center[0]
+    dy = probe.point[1] - magnet.center[1]
+    rho = math.hypot(dx, dy)
+    length = magnet.dims["length"]
+    b_rho, b_z = cylinder_B(
+        magnet.dims["radius"],
+        magnet.center[2] - 0.5 * length,
+        magnet.center[2] + 0.5 * length,
+        magnet.br[2] / MU0,
+        rho,
+        probe.point[2],
+    )
+    if rho == 0.0:
+        bx = by = 0.0
+    else:
+        bx, by = b_rho * dx / rho, b_rho * dy / rho
+    return _pick(np.array([bx, by, b_z]), probe.component, case)
 
 
 @check("halbach_bore_ideal")
@@ -265,3 +313,25 @@ def _F_pointpole_cylinders(case: Case) -> float:
     gap = separation - length
     _require(gap > 0.0, f"{case.name}: the magnets overlap; the gap must be positive")
     return F_pointpole_cylinders(abs(first.br[2]), radius, length, gap)
+
+
+@check("F_dipoles_general")
+def _F_dipoles_general(case: Case) -> float:
+    dipoles = [component for component in case.components if isinstance(component, Dipole)]
+    _require(
+        len(dipoles) == 2,
+        f"{case.name}: check 'F_dipoles_general' needs exactly two Dipole components, "
+        f"found {len(dipoles)}",
+    )
+    first, second = dipoles
+    _require(
+        math.dist(first.center, second.center) > 0.0,
+        f"{case.name}: the two dipoles share a centre",
+    )
+    probe = _probe(case, "F")
+    _require(
+        probe.point == second.center,
+        f"{case.name}: force probe must sit at the second dipole centre {second.center}",
+    )
+    force = F_dipoles_general(first.moment, second.moment, np.subtract(second.center, first.center))
+    return _pick(force, probe.component, case)

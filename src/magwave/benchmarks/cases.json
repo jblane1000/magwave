@@ -798,6 +798,634 @@
         "docs/research/validation-sources.md (g): point-pole valid within 2 % for g >= 3 L"
       ],
       "tolerance": 0.02
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "name": "m1",
+          "type": "dipole"
+        }
+      ],
+      "description": "Point dipole m = (1,0,0) A m^2 at the origin, transverse-aligned moment probed at (0.3, 0, 0.4) m for Bx. Hand-derived: Bx = mu0/(4pi)*(3*0.3*0.3/0.5^5 - 1/0.5^3) = 6.4e-8 T; pinned to scalar-potential central difference (h = 1e-6 m).",
+      "expected": [
+        {
+          "check": "dipole_B",
+          "quantity": "Bx",
+          "source": "dipole_B_fd central-difference gradient of scalar potential (h = 1e-6 m); validation table (a) 1e-9",
+          "tolerance": 1e-09,
+          "unit": "T",
+          "value": 6.399999999393158e-08
+        }
+      ],
+      "name": "dipole_tilted_Bx",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.3,
+            0.0,
+            0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (a) dipole_B vs dipole_B_fd",
+        "docs/research/validation-sources.md (a): Jackson 5.5"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "radius": 1.0
+          },
+          "kind": "loop",
+          "name": "l1",
+          "turns": 1,
+          "type": "coil"
+        }
+      ],
+      "description": "Single 1 m-radius loop carrying 1 A in z = 0, probed at (0, 0.3, -0.4) m (negative z and y-aligned rho): By equals B_rho = -8.611335230253812e-08 T, testing sign reversal for z < 0 and y projection.",
+      "expected": [
+        {
+          "check": "loop_B",
+          "quantity": "By",
+          "source": "loop_B_numeric 60 000-segment Biot-Savart integration at (0, 0.3, -0.4); validation table (b) 1e-10",
+          "tolerance": 1e-10,
+          "unit": "T",
+          "value": -8.611335230253812e-08
+        }
+      ],
+      "name": "loop_offaxis_negz_By",
+      "probes": [
+        {
+          "component": "y",
+          "point": [
+            0.0,
+            0.3,
+            -0.4
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (b) loop_B vs loop_B_numeric",
+        "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
+      ],
+      "tolerance": 1e-10
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "radius": 1.0
+          },
+          "kind": "loop",
+          "name": "l1",
+          "turns": 1,
+          "type": "coil"
+        }
+      ],
+      "description": "Same 1 m-radius, 1 A loop probed near the conductor at (0.9, 0.0, 0.1) m (elliptic parameter m = 0.994475...): tests elliptic-integral stability close to m -> 1.",
+      "expected": [
+        {
+          "check": "loop_B",
+          "quantity": "Bz",
+          "source": "loop_B_numeric 60 000-segment Biot-Savart integration at (0.9, 0, 0.1); validation table (b) 1e-10",
+          "tolerance": 1e-10,
+          "unit": "T",
+          "value": 1.3745696733573026e-06
+        }
+      ],
+      "name": "loop_near_wire_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.9,
+            0.0,
+            0.1
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (b) loop_B vs loop_B_numeric",
+        "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
+      ],
+      "tolerance": 1e-10
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "inner_radius": 1.0,
+            "length": 4.0,
+            "outer_radius": 1.0
+          },
+          "kind": "solenoid",
+          "name": "w1",
+          "turns": 400,
+          "type": "coil"
+        }
+      ],
+      "description": "Thin-walled solenoid R = 1 m, z in [-2, 2] m, 400 turns at 1 A (nI = 100 A/m), off-centre interior probe at (0, 0, 1.2) m where z - z2 < 0 and z - z1 > 0.",
+      "expected": [
+        {
+          "check": "thin_solenoid_Bz",
+          "quantity": "Bz",
+          "source": "_thin_loopsum 20 000-ring Biot-Savart superposition at z = 1.2 m; validation table (c) 1e-8",
+          "tolerance": 1e-08,
+          "unit": "T",
+          "value": 9.92224932578276e-05
+        }
+      ],
+      "name": "thin_solenoid_offcentre_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            1.2
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (c) thin_solenoid_Bz vs _thin_loopsum",
+        "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
+      ],
+      "tolerance": 1e-08
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 1.0,
+          "dims": {
+            "inner_radius": 1.0,
+            "length": 4.0,
+            "outer_radius": 1.0
+          },
+          "kind": "solenoid",
+          "name": "w1",
+          "turns": 400,
+          "type": "coil"
+        }
+      ],
+      "description": "Same thin-walled solenoid probed outside the winding at (0, 0, 3.0) m where both z - z1 > 0 and z - z2 > 0.",
+      "expected": [
+        {
+          "check": "thin_solenoid_Bz",
+          "quantity": "Bz",
+          "source": "_thin_loopsum 20 000-ring Biot-Savart superposition at z = 3.0 m; validation table (c) 1e-8",
+          "tolerance": 1e-08,
+          "unit": "T",
+          "value": 1.7182871503390225e-05
+        }
+      ],
+      "name": "thin_solenoid_outside_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            3.0
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (c) thin_solenoid_Bz vs _thin_loopsum",
+        "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
+      ],
+      "tolerance": 1e-08
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "current": 500.0,
+          "dims": {
+            "inner_radius": 0.5,
+            "length": 2.0,
+            "outer_radius": 1.5
+          },
+          "kind": "solenoid",
+          "name": "w1",
+          "turns": 4000,
+          "type": "coil"
+        }
+      ],
+      "description": "Volume winding R1 = 0.5 m, R2 = 1.5 m, z in [-1, 1] m, 4000 turns at 500 A (J = 1e6 A/m^2), probed outside the winding at (0, 0, 1.6) m where both z - z1 and z - z2 are positive (catches s vs |s| branch errors).",
+      "expected": [
+        {
+          "check": "thick_solenoid_Bz",
+          "quantity": "Bz",
+          "source": "_thick_loopsum 60-slice radial ring sum at z = 1.6 m, measured agreement 1.43e-5; tol 1e-4",
+          "tolerance": 0.0001,
+          "unit": "T",
+          "value": 0.24945774365109205
+        }
+      ],
+      "name": "thick_solenoid_outside_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            1.6
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (c) thick_solenoid_Bz vs _thick_loopsum",
+        "docs/research/validation-sources.md (c): 60-slice ring sum at z = 1.6 m, 1.43e-5 relative"
+      ],
+      "tolerance": 0.0001
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 2.0,
+            "radius": 1.0
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Uniformly magnetised cylinder R = 1 m, z in [-1, 1] m, M = 8e5 A/m along +z, probed outside the magnet at (0, 0, 2.5) m.",
+      "expected": [
+        {
+          "check": "cylinder_Bz_axis",
+          "quantity": "Bz",
+          "source": "cylinder_B_loopsuper 20 000-slice loop superposition at z = 2.5 m; validation table (e) 1e-8",
+          "tolerance": 1e-08,
+          "unit": "T",
+          "value": 0.06508055644195979
+        }
+      ],
+      "name": "cylinder_axis_outside_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.0,
+            0.0,
+            2.5
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (e) cylinder_Bz_axis vs cylinder_B_loopsuper",
+        "docs/research/validation-sources.md (e): Derby & Olbert 2010; Caciagli 2018"
+      ],
+      "tolerance": 1e-08
+    },
+    {
+      "components": [
+        {
+          "br": [
+            1.0053096491487339,
+            0.0,
+            0.0
+          ],
+          "center": [
+            0.0,
+            0.0,
+            1.4
+          ],
+          "demag_curve": null,
+          "dims": {
+            "size_x": 1.0,
+            "size_y": 0.6,
+            "size_z": 0.8
+          },
+          "kind": "cuboid",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Uniformly magnetised cuboid 1.0 x 0.6 x 0.8 m centred at (0, 0, 1.4) m with transverse remanence br = (1.0053096491487339, 0, 0) T (M = 8e5 A/m along +x), probed at (0.6, 0.2, 2.5) m for Bz. Expected value is the 800x800 charged-face quadrature over the x-normal faces.",
+      "expected": [
+        {
+          "check": "cuboid_B_general",
+          "quantity": "Bz",
+          "source": "cuboid_B_numeric 6-face surface-charge quadrature at 800x800; validation table (d) 1e-6",
+          "tolerance": 1e-06,
+          "unit": "T",
+          "value": 0.02194687640429577
+        }
+      ],
+      "name": "cuboid_transverse_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.6,
+            0.2,
+            2.5
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
+        "docs/research/validation-sources.md (d): Engel-Herbert & Hesjedal 2005"
+      ],
+      "tolerance": 1e-06
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "d1",
+          "type": "dipole"
+        },
+        {
+          "center": [
+            0.3,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "d2",
+          "type": "dipole"
+        }
+      ],
+      "description": "Two parallel dipoles m1 = m2 = (0, 0, 1) A m^2 side by side at (0, 0, 0) and (0.3, 0, 0) m: exact repulsion Fx = +3*mu0*m^2 / (4*pi*0.3^4) = +3.7037037037e-5 N along +x.",
+      "expected": [
+        {
+          "check": "F_dipoles_general",
+          "quantity": "Fx",
+          "source": "F_dipoles_fd central-difference gradient of U = -m2.B1 (h = 1e-6 m), measured agreement 8.55e-12; tol 1e-9",
+          "tolerance": 1e-09,
+          "unit": "N",
+          "value": 3.7037037037353535e-05
+        }
+      ],
+      "name": "force_dipoles_transverse",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.3,
+            0.0,
+            0.0
+          ],
+          "quantity": "F"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (h) F_dipoles_general vs F_dipoles_fd",
+        "docs/research/validation-sources.md (h): Jackson 5.5 / Lehner p. 309"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "d1",
+          "type": "dipole"
+        },
+        {
+          "center": [
+            0.2,
+            0.0,
+            0.2
+          ],
+          "moment": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "name": "d2",
+          "type": "dipole"
+        }
+      ],
+      "description": "Two parallel dipoles m1 = m2 = (0, 0, 1) A m^2 at oblique separation (0, 0, 0) and (0.2, 0, 0.2) m: exact dipole-dipole force magnitude |F|.",
+      "expected": [
+        {
+          "check": "F_dipoles_general",
+          "quantity": "|F|",
+          "source": "F_dipoles_fd central-difference gradient of U = -m2.B1 (h = 1e-6 m), measured agreement 4.99e-11; tol 1e-9",
+          "tolerance": 1e-09,
+          "unit": "N",
+          "value": 5.240784322526512e-05
+        }
+      ],
+      "name": "force_dipoles_oblique",
+      "probes": [
+        {
+          "component": "magnitude",
+          "point": [
+            0.2,
+            0.0,
+            0.2
+          ],
+          "quantity": "F"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (h) F_dipoles_general vs F_dipoles_fd",
+        "docs/research/validation-sources.md (h): Jackson 5.5 / Lehner p. 309"
+      ],
+      "tolerance": 1e-09
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 2.0,
+            "radius": 1.0
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Uniformly magnetised cylinder R = 1 m, z in [-1, 1] m, M = 8e5 A/m along +z, off-axis interior probe at (0.6, 0.0, 0.3) m: radial component Bx = B_rho via Derby-Olbert cel closed form.",
+      "expected": [
+        {
+          "check": "cylinder_B",
+          "quantity": "B_rho",
+          "source": "cylinder_B_loopsuper 2 000-slice loop superposition at (0.6, 0, 0.3), measured agreement 1.16e-7 (and 5.17e-6 vs 6000x300 sheet); tol 1e-6",
+          "tolerance": 1e-06,
+          "unit": "T",
+          "value": 0.04596499745507679
+        }
+      ],
+      "name": "cylinder_offaxis_Brho",
+      "probes": [
+        {
+          "component": "x",
+          "point": [
+            0.6,
+            0.0,
+            0.3
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (e) cylinder_B vs cylinder_B_loopsuper and cylinder_sheet_numeric",
+        "docs/research/validation-sources.md (e): Derby & Olbert 2010"
+      ],
+      "tolerance": 1e-06
+    },
+    {
+      "components": [
+        {
+          "br": [
+            0.0,
+            0.0,
+            1.0053096491487339
+          ],
+          "center": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "demag_curve": null,
+          "dims": {
+            "length": 2.0,
+            "radius": 1.0
+          },
+          "kind": "cylinder",
+          "name": "m1",
+          "type": "magnet"
+        }
+      ],
+      "description": "Same cylinder, off-axis interior probe at (0.6, 0.0, 0.3) m: axial component Bz via Derby-Olbert cel closed form.",
+      "expected": [
+        {
+          "check": "cylinder_B",
+          "quantity": "Bz",
+          "source": "cylinder_B_loopsuper 2 000-slice loop superposition at (0.6, 0, 0.3), measured agreement 3.00e-8 (and 1.33e-6 vs 6000x300 sheet); tol 1e-6",
+          "tolerance": 1e-06,
+          "unit": "T",
+          "value": 0.7369529459679288
+        }
+      ],
+      "name": "cylinder_offaxis_Bz",
+      "probes": [
+        {
+          "component": "z",
+          "point": [
+            0.6,
+            0.0,
+            0.3
+          ],
+          "quantity": "B"
+        }
+      ],
+      "schema": "magwave.case/1",
+      "sources": [
+        "docs/research/reference_formulas.py (e) cylinder_B vs cylinder_B_loopsuper and cylinder_sheet_numeric",
+        "docs/research/validation-sources.md (e): Derby & Olbert 2010"
+      ],
+      "tolerance": 1e-06
     }
   ],
   "schema": "magwave.benchmarks/1"
