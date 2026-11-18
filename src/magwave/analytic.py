@@ -28,12 +28,15 @@ import numpy as np
 from .units import MU0
 
 __all__ = [
+    "cel",
     "cuboid_B",
+    "cylinder_B",
     "cylinder_Bz_axis",
     "dipole_B",
     "ellipk_m",
     "ellipe_m",
     "F_dipole_coaxial",
+    "F_dipoles_general",
     "F_pointpole_cylinders",
     "halbach_bore_ideal",
     "loop_B",
@@ -84,6 +87,54 @@ def ellipe_m(m: float) -> float:
     if not 0.0 <= float(m) < 1.0:
         raise ValueError("ellipe_m: parameter m must satisfy 0 <= m < 1")
     return _ellip_agm(float(m))[1]
+
+
+def cel(kc: float, p: float, c: float, s: float) -> float:
+    """Bulirsch generalized complete elliptic integral ``cel(kc, p, c, s)``.
+
+    Computed by Bulirsch's AGM iteration as formulated in Derby & Olbert, *Am. J. Phys.*
+    78(3), 229-235 (2010), eq. (9); no numerical quadrature. Requires ``kc != 0``.
+    """
+    kc_val = float(kc)
+    if kc_val == 0.0:
+        raise ValueError("cel: complementary modulus kc must be non-zero")
+    errtol = 1e-15
+    k = abs(kc_val)
+    pp = float(p)
+    cc = float(c)
+    ss = float(s)
+    em = 1.0
+    if pp > 0.0:
+        pp = math.sqrt(pp)
+        ss = ss / pp
+    else:
+        f = kc_val * kc_val
+        q = 1.0 - f
+        g = 1.0 - pp
+        f = f - pp
+        q = q * (ss - cc * pp)
+        pp = math.sqrt(f / g)
+        cc = (cc - ss) / g
+        ss = -q / (g * g * pp) + cc * pp
+    f = cc
+    cc = cc + ss / pp
+    g = k / pp
+    ss = 2.0 * (ss + f * g)
+    pp = g + pp
+    g = em
+    em = k + em
+    kk = k
+    while abs(g - k) > g * errtol:
+        k = 2.0 * math.sqrt(kk)
+        kk = k * em
+        f = cc
+        cc = cc + ss / pp
+        g = kk / pp
+        ss = 2.0 * (ss + f * g)
+        pp = g + pp
+        g = em
+        em = k + em
+    return (math.pi / 2.0) * (ss + cc * em) / (em * (em + pp))
 
 
 def dipole_B(moment, point) -> np.ndarray:
@@ -168,47 +219,85 @@ def thick_solenoid_Bz(R1: float, R2: float, z1: float, z2: float, J: float, z: f
     return float(0.5 * MU0 * J * (bracket(z - z1) - bracket(z - z2)))
 
 
-def cuboid_B(M: float, box: tuple[float, float, float, float, float, float], point) -> np.ndarray:
-    """Field of a uniformly magnetised rectangular cuboid, magnetisation along ``+z``.
+def _cuboid_face_pair(
+    m_w: float,
+    u1: float,
+    u2: float,
+    v1: float,
+    v2: float,
+    w1: float,
+    w2: float,
+    u: float,
+    v: float,
+    w: float,
+) -> tuple[float, float, float]:
+    """Eight-corner magnetic-charge field of one pair of faces perpendicular to ``w``."""
 
-    Inputs: ``M`` magnetisation [A/m], ``box = (x1, x2, y1, y2, z1, z2)`` [m], ``point``
-    [m]. Output: B in tesla as a 3-vector.
+    def gx(du: float, dv: float, t: float) -> float:
+        if t == 0.0:
+            t = 1e-12
+        return float(np.log((np.sqrt(du * du + dv * dv + t * t) - dv) / abs(t)))
 
-    The eight-corner magnetic-charge form is exact inside and outside the body; the
-    interior value already contains the ``+mu0*M`` jump, so it must not be added again.
-    A point exactly on a face plane is nudged off it by 1e-12 m (tangential B is
+    def gy(du: float, dv: float, t: float) -> float:
+        if t == 0.0:
+            t = 1e-12
+        return float(np.log((np.sqrt(du * du + dv * dv + t * t) - du) / abs(t)))
+
+    def gz(du: float, dv: float, t: float) -> float:
+        return float(np.arctan2(du * dv, t * np.sqrt(du * du + dv * dv + t * t)))
+
+    corners = ((u1, v1, 1.0), (u2, v1, -1.0), (u1, v2, -1.0), (u2, v2, 1.0))
+
+    def patch(g, t: float) -> float:
+        return sum(sign * g(u - uc, v - vc, t) for (uc, vc, sign) in corners)
+
+    t_top, t_bottom = w - w2, w - w1
+    fac = MU0 * m_w / (4.0 * np.pi)
+    return (
+        fac * (patch(gx, t_top) - patch(gx, t_bottom)),
+        fac * (patch(gy, t_top) - patch(gy, t_bottom)),
+        fac * (patch(gz, t_top) - patch(gz, t_bottom)),
+    )
+
+
+def cuboid_B(M, box: tuple[float, float, float, float, float, float], point) -> np.ndarray:
+    """Field of a uniformly magnetised rectangular cuboid.
+
+    Inputs: ``M`` magnetisation [A/m] (either a scalar along ``+z`` or a 3-vector
+    ``(Mx, My, Mz)``), ``box = (x1, x2, y1, y2, z1, z2)`` [m], ``point`` [m]. Output: B in
+    tesla as a 3-vector.
+
+    The eight-corner magnetic-charge form per face pair is exact inside and outside the
+    body; the interior value already contains the ``+mu0*M`` jump, so it must not be added
+    again. A point exactly on a face plane is nudged off it by 1e-12 m (tangential B is
     continuous; do not sample on a face).
     """
     x1, x2, y1, y2, z1, z2 = box
     x, y, z = (float(v) for v in point)
-
-    def gx(u: float, v: float, t: float) -> float:
-        if t == 0.0:
-            t = 1e-12
-        return float(np.log((np.sqrt(u * u + v * v + t * t) - v) / abs(t)))
-
-    def gy(u: float, v: float, t: float) -> float:
-        if t == 0.0:
-            t = 1e-12
-        return float(np.log((np.sqrt(u * u + v * v + t * t) - u) / abs(t)))
-
-    def gz(u: float, v: float, t: float) -> float:
-        return float(np.arctan2(u * v, t * np.sqrt(u * u + v * v + t * t)))
-
-    corners = ((x1, y1, 1.0), (x2, y1, -1.0), (x1, y2, -1.0), (x2, y2, 1.0))
-
-    def patch(g, t: float) -> float:
-        return sum(sign * g(x - xc, y - yc, t) for (xc, yc, sign) in corners)
-
-    t_top, t_bottom = z - z2, z - z1
-    fac = MU0 * M / (4.0 * np.pi)
-    return np.array(
-        [
-            fac * (patch(gx, t_top) - patch(gx, t_bottom)),
-            fac * (patch(gy, t_top) - patch(gy, t_bottom)),
-            fac * (patch(gz, t_top) - patch(gz, t_bottom)),
-        ]
-    )
+    m_arr = np.asarray(M, dtype=float)
+    if m_arr.ndim == 0:
+        bx, by, bz = _cuboid_face_pair(float(m_arr), x1, x2, y1, y2, z1, z2, x, y, z)
+        return np.array([bx, by, bz])
+    if m_arr.shape != (3,):
+        raise ValueError("cuboid_B: M must be a scalar (+z) or a 3-vector")
+    mx, my, mz = float(m_arr[0]), float(m_arr[1]), float(m_arr[2])
+    bx = by = bz = 0.0
+    if mx != 0.0:
+        by_x, bz_x, bx_x = _cuboid_face_pair(mx, y1, y2, z1, z2, x1, x2, y, z, x)
+        bx += bx_x
+        by += by_x
+        bz += bz_x
+    if my != 0.0:
+        bz_y, bx_y, by_y = _cuboid_face_pair(my, z1, z2, x1, x2, y1, y2, z, x, y)
+        bx += bx_y
+        by += by_y
+        bz += bz_y
+    if mz != 0.0:
+        bx_z, by_z, bz_z = _cuboid_face_pair(mz, x1, x2, y1, y2, z1, z2, x, y, z)
+        bx += bx_z
+        by += by_z
+        bz += bz_z
+    return np.array([bx, by, bz])
 
 
 def cylinder_Bz_axis(R: float, z1: float, z2: float, M: float, z: float) -> float:
@@ -227,6 +316,47 @@ def cylinder_Bz_axis(R: float, z1: float, z2: float, M: float, z: float) -> floa
         * M
         * ((z - z1) / np.sqrt((z - z1) ** 2 + R * R) - (z - z2) / np.sqrt((z - z2) ** 2 + R * R))
     )
+
+
+def cylinder_B(
+    R: float, z1: float, z2: float, M: float, rho: float, z: float
+) -> tuple[float, float]:
+    """Field of a uniformly axially magnetised cylinder at an arbitrary cylindrical point.
+
+    Inputs: ``R`` radius [m], end planes ``z1 < z2`` [m], ``M`` magnetisation along ``+z``
+    [A/m], ``rho >= 0`` cylindrical radius [m], ``z`` axial coordinate [m]. Output:
+    ``(B_rho, B_z)`` in tesla, using the Derby & Olbert (2010) closed form in Bulirsch's
+    generalised complete elliptic integral :func:`cel`.
+    """
+    if not R > 0.0:
+        raise ValueError("cylinder_B: radius must be positive")
+    if not z2 > z1:
+        raise ValueError("cylinder_B: require z2 > z1")
+    if rho < 0.0:
+        raise ValueError("cylinder_B: rho must be non-negative")
+    if rho < 1e-13:
+        return 0.0, cylinder_Bz_axis(R, z1, z2, M, z)
+    z_plus = z - z1
+    z_minus = z - z2
+    if (rho == R and z_plus == 0.0) or (rho == R and z_minus == 0.0):
+        raise ValueError("cylinder_B: field point lies on the cylinder rim singularity")
+    dp2 = (R + rho) ** 2 + z_plus * z_plus
+    dm2 = (R + rho) ** 2 + z_minus * z_minus
+    kp = math.sqrt(((R - rho) ** 2 + z_plus * z_plus) / dp2)
+    km = math.sqrt(((R - rho) ** 2 + z_minus * z_minus) / dm2)
+    if kp == 0.0 or km == 0.0:
+        raise ValueError("cylinder_B: field point lies on the cylinder rim singularity")
+    b0 = MU0 * M / math.pi
+    b_rho = b0 * (
+        (R / math.sqrt(dp2)) * cel(kp, 1.0, 1.0, -1.0)
+        - (R / math.sqrt(dm2)) * cel(km, 1.0, 1.0, -1.0)
+    )
+    gamma = (R - rho) / (R + rho)
+    b_z = (b0 * R / (R + rho)) * (
+        (z_plus / math.sqrt(dp2)) * cel(kp, gamma * gamma, 1.0, gamma)
+        - (z_minus / math.sqrt(dm2)) * cel(km, gamma * gamma, 1.0, gamma)
+    )
+    return float(b_rho), float(b_z)
 
 
 def halbach_bore_ideal(Br: float, Ri: float, Ro: float) -> float:
@@ -278,3 +408,25 @@ def F_pointpole_cylinders(Br: float, R: float, L: float, g: float) -> float:
         raise ValueError("F_pointpole_cylinders: R and L must be positive")
     c = np.pi * Br**2 * R**4 / (4.0 * MU0)
     return float(c * (1.0 / g**2 - 2.0 / (g + L) ** 2 + 1.0 / (g + 2.0 * L) ** 2))
+
+
+def F_dipoles_general(m1, m2, r_vec) -> np.ndarray:
+    """Exact force on dipole ``m2`` due to dipole ``m1`` at displacement ``r_vec = r2 - r1``.
+
+    Inputs: dipole moments ``m1``, ``m2`` in A m^2, displacement vector ``r_vec`` in
+    metres. Output: force vector in newtons on the second dipole (positive along the
+    direction dipole 2 is pushed), from ``F = -grad_2 U`` with
+    ``U = mu0/(4 pi r^3) [m1.m2 - 3(m1.rhat)(m2.rhat)]``.
+    """
+    r = np.asarray(r_vec, dtype=float)
+    m1_arr = np.asarray(m1, dtype=float)
+    m2_arr = np.asarray(m2, dtype=float)
+    d = float(np.sqrt(r @ r))
+    if d < 1e-300:
+        raise ValueError("F_dipoles_general: dipoles share a position (r = 0)")
+    rhat = r / d
+    m1_r = float(m1_arr @ rhat)
+    m2_r = float(m2_arr @ rhat)
+    m1_m2 = float(m1_arr @ m2_arr)
+    pref = 3.0 * MU0 / (4.0 * np.pi * d**4)
+    return pref * (m1_r * m2_arr + m2_r * m1_arr + (m1_m2 - 5.0 * m1_r * m2_r) * rhat)
