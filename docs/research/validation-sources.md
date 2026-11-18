@@ -35,6 +35,13 @@ agreement (rule of thumb — exact crossover depends on aspect ratio and is not 
 Citations: Jackson, *Classical Electrodynamics*, 3rd ed., §5.5 (book, no URL); Wikipedia
 <https://en.wikipedia.org/wiki/Magnetic_dipole>.
 
+### Wave A probe — `dipole_tilted_Bx`
+
+* **Closed form:** `dipole_B(m, r)` for `m = (1.0, 0, 0)` A·m² at origin, probed at `r = (0.3, 0, 0.4)` m (`B_x = mu0/(4*pi) * (3*0.3*0.3/0.5^5 - 1/0.5^3) = 6.4e-8` T).
+* **Independent reference:** `dipole_B_fd` in `reference_formulas.py` — central-difference gradient `-grad psi_m` (`h = 1e-6` m) of the magnetic scalar potential `psi_m(r) = (mu0 / 4*pi) * (m . r) / |r|^3`, giving `6.399999999393158e-08` T.
+* **Measured agreement:** `9.48e-11` relative (`1.86e-15` vs exact `6.4e-8` T).
+* **Claimed tolerance:** `1e-9` relative (`check` id: `dipole_B`).
+
 ---
 
 ## (b) Circular current loop — on-axis and off-axis (complete elliptic integrals)
@@ -72,6 +79,20 @@ circular current loop", IEEE Trans. Magn. 39(2), 961 (2003); M. Ortner, P. Leitn
 "Numerically stable and computationally efficient expression for the magnetic field of a current loop",
 *Magnetism* 3(1), 11–31 (2022) — numerically stable implementation notes; NIST DLMF §19,
 <https://dlmf.nist.gov/19> for the integral definitions.
+
+### Wave A probe — `loop_offaxis_negz_By`
+
+* **Closed form:** `loop_B(a=1.0, rho=0.3, z=-0.4, I=1.0)` projected onto `+y` at `(0.0, 0.3, -0.4)` m (`B_y = B_rho = -8.611335230253824e-08` T, testing `z < 0` sign reversal and Cartesian projection).
+* **Independent reference:** `loop_B_numeric` in `reference_formulas.py` (60 000-segment Biot–Savart chord sum at `(0.0, 0.3, -0.4)` m), giving `-8.611335230253812e-08` T.
+* **Measured agreement:** `1.38e-15` relative.
+* **Claimed tolerance:** `1e-10` relative (`check` id: `loop_B`).
+
+### Wave A probe — `loop_near_wire_Bz`
+
+* **Closed form:** `loop_B(a=1.0, rho=0.9, z=0.1, I=1.0)` axial component `B_z` at `(0.9, 0.0, 0.1)` m (`m = 0.994475...`, testing AGM elliptic-integral stability near the wire, `1.374569673357306e-06` T).
+* **Independent reference:** `loop_B_numeric` in `reference_formulas.py` (60 000-segment Biot–Savart chord sum at `(0.9, 0.0, 0.1)` m), giving `1.3745696733573026e-06` T.
+* **Measured agreement:** `2.16e-15` relative.
+* **Claimed tolerance:** `1e-10` relative (`check` id: `loop_B`).
 
 ---
 
@@ -116,6 +137,27 @@ the classical thick-solenoid treatment (elliptic-integral `F(p,u)` off axis); N.
 <https://arxiv.org/abs/0909.3880> — exact on-axis form (their eq. 2) and exact off-axis solution via one
 compactly defined function `C(k,c,p,s)` with published pseudo-code.
 
+### Wave A probe — `thin_solenoid_offcentre_Bz`
+
+* **Closed form:** `thin_solenoid_Bz(R=1.0, z1=-2.0, z2=2.0, nI=100.0, z=1.2)` (`9.922249318248605e-05` T, asymmetric interior probe where `z - z1 > 0` and `z - z2 < 0`).
+* **Independent reference:** `_thin_loopsum` in `reference_formulas.py` (20 000-ring Biot–Savart superposition with `dI = nI * dz`), giving `9.92224932578276e-05` T.
+* **Measured agreement:** `7.59e-10` relative.
+* **Claimed tolerance:** `1e-8` relative (`check` id: `thin_solenoid_Bz`).
+
+### Wave A probe — `thin_solenoid_outside_Bz`
+
+* **Closed form:** `thin_solenoid_Bz(R=1.0, z1=-2.0, z2=2.0, nI=100.0, z=3.0)` (`1.7182871558470552e-05` T, external axial probe where both `z - z1` and `z - z2` are positive).
+* **Independent reference:** `_thin_loopsum` in `reference_formulas.py` (20 000-ring Biot–Savart superposition with `dI = nI * dz`), giving `1.7182871503390225e-05` T.
+* **Measured agreement:** `3.21e-09` relative.
+* **Claimed tolerance:** `1e-8` relative (`check` id: `thin_solenoid_Bz`).
+
+### Wave A probe — `thick_solenoid_outside_Bz`
+
+* **Closed form:** `thick_solenoid_Bz(R1=0.5, R2=1.5, z1=-1.0, z2=1.0, J=1e6, z=1.6)` (`0.24945417711519968` T, outside the winding where both `z - z1` and `z - z2` are positive, catching `s` vs `|s|` sign traps).
+* **Independent reference:** `_thick_loopsum` in `reference_formulas.py` (60-slice radial ring sum), giving `0.24945774365109205` T.
+* **Measured agreement:** `1.43e-05` relative.
+* **Claimed tolerance:** `1e-4` relative (`check` id: `thick_solenoid_Bz`).
+
 ---
 
 ## (d) Uniformly magnetised rectangular cuboid — the 8-corner formula
@@ -155,6 +197,13 @@ J. Yang et al., Supercond. Sci. Technol. 3, 591 (1990); Magpylib's reference lis
 <https://magpylib.readthedocs.io/en/latest/_pages/user_guide/guide_resources_01_physics.html>
 (cites exactly these).
 
+### Arbitrary uniform magnetisation and Wave A probe — `cuboid_transverse_Bz`
+
+* **Closed form:** For an arbitrary uniform magnetisation `M = (M_x, M_y, M_z)`, bound surface charge `sigma = M . n` appears on all three face pairs (`x = x1, x2`, `y = y1, y2`, `z = z1, z2`), so `cuboid_B` sums the 8-corner face-pair contribution cyclically over `(y, z, x)` for `M_x`, `(z, x, y)` for `M_y`, and `(x, y, z)` for `M_z`. For `cuboid_transverse_Bz` (`1.0 x 0.6 x 0.8` m at `(0, 0, 1.4)` m, `M = (8e5, 0, 0)` A/m, probe `(0.6, 0.2, 2.5)` m), the closed form gives `B_z = 0.02194688235213853` T.
+* **Independent reference:** `cuboid_B_numeric` in `reference_formulas.py` extended to sum 800x800 midpoint surface-charge quadrature over all non-zero face pairs (`sigma = M . n`), giving `0.02194687640429577` T.
+* **Measured agreement:** `2.71e-07` relative.
+* **Claimed tolerance:** `1e-6` relative (`check` id: `cuboid_B_general`).
+
 ---
 
 ## (e) Uniformly magnetised cylinder — on-axis and general point
@@ -186,6 +235,45 @@ algorithm); A. Caciagli, R. J. Baars, A. P. Philipse, B. W. M. Kuipers, "Exact e
 field of a finite cylinder with arbitrary uniform magnetization", J. Magn. Magn. Mater. 456, 423–432
 (2018); F. Slanovc, M. Ortner, M. Moridi, C. Abert, D. Suess, "Full analytical solution for the magnetic
 field of uniformly magnetized cylinder tiles", J. Magn. Magn. Mater. 559, 169482 (2022).
+
+### Wave A probe — `cylinder_axis_outside_Bz`
+
+* **Closed form:** `cylinder_Bz_axis(R=1.0, z1=-1.0, z2=1.0, M=8e5, z=2.5)` (`0.06508055648801153` T, axial probe outside the magnet).
+* **Independent reference:** `cylinder_B_loopsuper` in `reference_formulas.py` (20 000-slice circular-loop superposition along the side wall with `dI = M * dz'`), giving `0.06508055644195736` T.
+* **Measured agreement:** `7.08e-10` relative.
+* **Claimed tolerance:** `1e-8` relative (`check` id: `cylinder_Bz_axis`).
+
+### Off-axis cylinder closed form (Derby–Olbert `cel`)
+
+```python
+# cylinder: radius R, z in [z1, z2], uniform M along +z; cylindrical field point (rho, z)
+z_plus  = z - z1 ; z_minus = z - z2
+dp2 = (R + rho)**2 + z_plus**2 ; dm2 = (R + rho)**2 + z_minus**2
+kp = sqrt(((R - rho)**2 + z_plus**2) / dp2)
+km = sqrt(((R - rho)**2 + z_minus**2) / dm2)
+gamma = (R - rho) / (R + rho)
+B_rho = (mu0 * M / pi) * (R / sqrt(dp2) * cel(kp, 1, 1, -1) - R / sqrt(dm2) * cel(km, 1, 1, -1))
+B_z   = (mu0 * M * R / (pi * (R + rho))) * (
+    z_plus / sqrt(dp2) * cel(kp, gamma**2, 1, gamma)
+    - z_minus / sqrt(dm2) * cel(km, gamma**2, 1, gamma)
+)
+```
+
+In `analytic.py`, `cel(kc, p, c, s)` uses Bulirsch's AGM iteration (Derby & Olbert 2010, eq. 9); in `reference_formulas.py`, `cel_m` evaluates the defining integral by 30 001-point composite Simpson quadrature.
+
+#### Wave A stretch — `cylinder_offaxis_Brho`
+
+* **Closed form:** `cylinder_B(R=1.0, z1=-1.0, z2=1.0, M=8e5, rho=0.6, z=0.3)[0]` projected to `B_x` at `(0.6, 0.0, 0.3)` m (`0.04596500280615282` T).
+* **Independent references:** `cylinder_B_loopsuper` (`nt=2000`, `0.04596499745507679` T) and `cylinder_sheet_numeric` (`nseg=6000, nz=300`, `0.04596476497762952` T) in `reference_formulas.py`.
+* **Measured agreement:** `1.16e-07` relative vs `cylinder_B_loopsuper`; `5.17e-06` relative vs `cylinder_sheet_numeric`.
+* **Claimed tolerance:** `1e-6` relative (`check` id: `cylinder_B`).
+
+#### Wave A stretch — `cylinder_offaxis_Bz`
+
+* **Closed form:** `cylinder_B(R=1.0, z1=-1.0, z2=1.0, M=8e5, rho=0.6, z=0.3)[1]` (`0.7369529238661933` T).
+* **Independent references:** `cylinder_B_loopsuper` (`nt=2000`, `0.7369529459679288` T) and `cylinder_sheet_numeric` (`nseg=6000, nz=300`, `0.7369539061585597` T) in `reference_formulas.py`.
+* **Measured agreement:** `3.00e-08` relative vs `cylinder_B_loopsuper`; `1.33e-06` relative vs `cylinder_sheet_numeric`.
+* **Claimed tolerance:** `1e-6` relative (`check` id: `cylinder_B`).
 
 ---
 
@@ -296,6 +384,35 @@ closed forms: G. Akoun, J.-P. Yonnet, "3D analytical calculation of the forces e
 cuboidal magnets", IEEE Trans. Magn. MAG-20(5), 1962–1964 (1984), IEEE doc 1063554; D. Vokoun,
 M. Beleggia, L. Heller, P. Sittner, "Magnetostatic interactions and forces between cylindrical permanent
 magnets", J. Magn. Magn. Mater. 321(22), 3758–3763 (2009), DOI 10.1016/j.jmmm.2009.07.030.
+
+---
+
+## (h) General dipole–dipole force (arbitrary orientation and separation)
+
+```python
+# Force on dipole m2 at displacement r = r2 - r1 from dipole m1
+# From U = mu0/(4*pi*r^3) * [m1.m2 - 3*(m1.rhat)*(m2.rhat)],  F = -grad_2 U
+rhat = r / norm(r)
+F = (3*mu0 / (4*pi*norm(r)**4)) * (
+    dot(m1, rhat)*m2 + dot(m2, rhat)*m1 + (dot(m1, m2) - 5*dot(m1, rhat)*dot(m2, rhat))*rhat
+)
+```
+
+Sign convention: `F` is the force vector acting **on dipole 2** (positive along the direction dipole 2 is pushed; e.g., parallel side-by-side dipoles repel along `+rhat`).
+
+### Wave A probe — `force_dipoles_transverse`
+
+* **Closed form:** `F_dipoles_general(m1=(0,0,1), m2=(0,0,1), r_vec=(0.3, 0, 0))[0]` (`3.7037037037037037e-05` N, pure transverse repulsion along `+x`).
+* **Independent reference:** `F_dipoles_fd` in `reference_formulas.py` — central-difference gradient `-grad_2 U` (`h = 1e-6` m) of `U(r) = -m2 . dipole_B(m1, r)`, giving `3.7037037037353535e-05` N.
+* **Measured agreement:** `8.55e-12` relative.
+* **Claimed tolerance:** `1e-9` relative (`check` id: `F_dipoles_general`).
+
+### Wave A probe — `force_dipoles_oblique`
+
+* **Closed form:** `|F_dipoles_general(m1=(0,0,1), m2=(0,0,1), r_vec=(0.2, 0, 0.2))|` (`5.240784322265128e-05` N).
+* **Independent reference:** `F_dipoles_fd` in `reference_formulas.py` — central-difference gradient `-grad_2 U` (`h = 1e-6` m) of `U(r) = -m2 . dipole_B(m1, r)`, giving `5.240784322526512e-05` N.
+* **Measured agreement:** `4.99e-11` relative.
+* **Claimed tolerance:** `1e-9` relative (`check` id: `F_dipoles_general`).
 
 ---
 
@@ -410,6 +527,7 @@ result against the formula.
 | (e) cylinder on-axis / general | on-axis 1e-8; off-axis 1e-3 (loop-superposition route) or 1e-8 with the Derby-Olbert closed form | 3.9e-6 (superposition vs independent sheet integration) | superposition error is purely quadrature (converges as 1/nt); prefer implementing the `cel` closed form for the tight gate |
 | (f) Halbach bore field | 2 % vs `Br*ln(Ro/Ri)` at the validated test geometry; uniformity figure 0 in the 2-D ideal, gate the engine with 2 % | 2-D formula verified to ~1e-6 | errors are physical modelling, not numerics: segmentation of the rotating M, finite-length end effects, and material mu_r > 1 — all bounded by published data (Bjørk 2008) [finite-length factor: UNVERIFIED here] |
 | (g) two-magnet force | exact-charge reference: 1e-3 (quad) or 1e-6 (Akoun-Yonnet closed form); dipole reference: 2 % only for `d >=~ 10 L` | far-limit 0.31 %, mid-range table above | the dipole is systematically low and fails fast near contact (−30 % at d = 2L); the checklist's "<= 2 % outside near-contact" must define *near-contact* (recommend: dipole gate only for `d >= 10L`; otherwise compare against the exact charge model) |
+| (h) general dipole-dipole force | 1e-9 rel | <= 5.0e-11 vs central-difference gradient of `U = -m2 . B1` | exact point-dipole formula; residual is the O(h^2) truncation error of the `h = 1e-6` m central-difference reference |
 | TEAM 20 | `Fz` <= 10 % vs 54.4 N at 3000 AT (deviation recorded, not hidden); `Bz` at P1/P2 and line values <= 5 % except `P1` at 1000 AT (documented outlier); mean pole `Bz` <= 3 % vs -1.75 T | n/a (rung 2) | stacked uncertainties: 2 % Hall probe, 2.3 T-clamped B-H extrapolation (`B = mu0*H + Ms`), pole/yoke positioning ~10 um, and the unresolved cross-code scatter (21 solutions, 13 codes — numeric spread [UNVERIFIED]). A modern production solver landed <= 4.5 % (LS-DYNA VM), so 10 % leaves room for coarser meshes while still catching real defects; the 1 % anti-vacuity perturbation check (PRD FR-070) is far tighter and catches sign/scale errors |
 
 If the COMPEL Table-6 spread becomes available, tighten the TEAM 20 force gate from 10 % toward the
