@@ -23,14 +23,15 @@ REPORT_SCHEMA = "magwave.report/1"
 
 
 def display_case_file(case_path: str | Path) -> str:
-    """Return a deterministic, non-absolute display path for ``case_path``."""
+    """Return a deterministic, non-absolute, cwd-independent display path for ``case_path``."""
     path = Path(case_path)
     if not path.is_absolute():
         return path.as_posix()
-    try:
-        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
-    except ValueError:
-        return path.name
+    resolved = path.resolve()
+    for parent in resolved.parents:
+        if (parent / "pyproject.toml").is_file():
+            return resolved.relative_to(parent).as_posix()
+    return resolved.name
 
 
 def _units_summary(result: Result) -> str:
@@ -45,21 +46,28 @@ def _units_summary(result: Result) -> str:
     return ", ".join(parts)
 
 
-def _match_corpus_expected(
+def _probes_match(case: Case, corpus_case: Case) -> bool:
+    """Return ``True`` when ``case`` and ``corpus_case`` share identical probes in order."""
+    return len(case.probes) == len(corpus_case.probes) and all(
+        a.point == b.point and a.quantity == b.quantity and a.component == b.component
+        for a, b in zip(case.probes, corpus_case.probes, strict=True)
+    )
+
+
+def _corpus_expected(
     case: Case, corpus_by_name: Mapping[str, Case]
-) -> list[ExpectedValue | None]:
-    """Pair each probe of a corpus-named case with its expected value, or ``None``."""
+) -> tuple[bool, bool, list[ExpectedValue | None]]:
+    """Return ``(is_corpus, name_mismatch, expected_per_probe)`` using the corpus authority."""
     corpus_case = corpus_by_name.get(case.name)
     if corpus_case is None:
-        return [None] * len(case.probes)
-    if len(case.probes) == len(case.expected):
-        return list(case.expected)
-    if len(case.expected) == 1 and len(case.probes) == 1:
-        return [case.expected[0]]
-    return [
+        return False, False, [None] * len(case.probes)
+    if not _probes_match(case, corpus_case):
+        return False, True, [None] * len(case.probes)
+    expected_items = [
         corpus_case.expected[i] if i < len(corpus_case.expected) else None
         for i in range(len(case.probes))
     ]
+    return True, False, expected_items
 
 
 def _validate_result_against_case(case: Case, result: Result) -> None:
@@ -107,8 +115,7 @@ def build_report_payload(
     _validate_result_against_case(case, result)
     corpus_cases = load_corpus() if corpus is None else corpus
     corpus_by_name = {item.name: item for item in corpus_cases}
-    is_corpus = case.name in corpus_by_name
-    expected_items = _match_corpus_expected(case, corpus_by_name)
+    is_corpus, name_mismatch, expected_items = _corpus_expected(case, corpus_by_name)
 
     probe_rows: list[dict[str, Any]] = []
     for index, (probe, sample, expected_item) in enumerate(
@@ -149,6 +156,8 @@ def build_report_payload(
         "corpus_case": is_corpus,
         "probes": probe_rows,
     }
+    if name_mismatch:
+        payload["corpus_name_mismatch"] = True
     if is_corpus:
         checked = [row["passed"] for row in probe_rows if "passed" in row]
         all_passed = bool(checked) and all(checked)
