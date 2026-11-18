@@ -67,6 +67,48 @@ See [docs/adr/0002-licence-strategy.md](docs/adr/0002-licence-strategy.md).
 - [docs/adr/](docs/adr/) — decision records (stack, licence, engines, UI, validation).
 - [docs/CHECKLISTS/](docs/CHECKLISTS/) — release, validation, mesh quality, CAD import.
 
+## Quickstart
+
+This walkthrough uses the shipped point-dipole example (`examples/solve-dipole.json`) and runs offline from a fresh checkout.
+
+1. **Create a virtual environment and install MagWave with the `gui` extra:**
+
+   ```bash
+   git clone https://github.com/jblane1000/magwave.git
+   cd magwave
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install --upgrade pip
+   python -m pip install -e ".[gui]"
+   ```
+
+2. **Open the shipped example case in the desktop window:**
+
+   ```bash
+   magwave gui examples/solve-dipole.json
+   ```
+
+   In the window you will see:
+   - **Case**: `dipole_axis_Bz` (`examples/solve-dipole.json`)
+   - **Provenance (Engine & Rung)**: `Engine ID: magpylib`, the installed `Engine Version`, `Rung: second-code`, and the solver `Method`
+   - **Components / Role Assignment**: `m1` (`dipole`, `moment=(0.0, 0.0, 1.0) A m^2`) — switching a component's kind works where `magwave.case/1` permits it (e.g. magnet `cuboid` ↔ `cylinder`, coil `loop` ↔ `solenoid`); unsupported assignments such as `steel (permeable)` report a blocking explanation in **Validation & Solver Problems**
+   - **Probes**: `probe #0` at `(0.0, 0.0, 0.5)` m requesting `B`, component `z` (`T`)
+   - **Expected Values**: check `dipole_B`, `Bz = 1.6e-06 T`, tolerance `1e-09`
+
+3. **Run the solve:** click **Run** (or press `F5`). The engine runs `validate()` first and then solves `probe #0`, showing `1.6000000000000004e-06` `T` under `rung: second-code`.
+
+4. **Read the 3D Field View (PyVista):**
+   - **What it shows**: 3D component geometry (a sphere for a dipole, box/cylinder for magnets, circle/cylinder for coils), probe points coloured by the solved scalar (`B (T)`), and 3D `B`-vector arrow glyphs at each solved probe point.
+   - **What it does not show**: slice planes, iso-surfaces, and field streamlines are not implemented in v1. In headless environments (`QT_QPA_PLATFORM=offscreen` or no display server), PyVista constructs the scene datasets in memory without claiming a live 3D render canvas.
+
+5. **Export the Markdown report:** click **Export Report...** (or press `Ctrl+E`) and save to the default filename `dipole_axis_Bz-report.md` (headless CLI equivalent: `magwave report examples/solve-dipole.json --out dipole_axis_Bz-report.md`).
+
+   Open `dipole_axis_Bz-report.md` (for example with `cat dipole_axis_Bz-report.md`). You should see the provenance header (`engine: magpylib`, `rung: second-code`), the fenced JSON summary at the bottom, and this probe table line:
+
+   ```text
+   | probe #0 (0.0, 0.0, 0.5) m | B | z | 1.6000000000000004e-06 | T | 1.6e-06 | 1e-09 | PASS |
+   ```
+
 ## Development
 
 ```bash
