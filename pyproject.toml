@@ -34,7 +34,7 @@ dependencies = [
 [project.optional-dependencies]
 gui = ["PySide6>=6.6", "pyvista>=0.43"]
 cad = ["trimesh>=4.0"]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "pytest-qt>=4.4", "ruff>=0.6"]
 
 [project.scripts]
 magwave = "magwave.cli:main"

@@ -14,6 +14,9 @@ Implemented:
   writes a deterministic Markdown report with provenance, probe table, corpus comparison,
   and a final JSON block (FR-053). Exit 1 if the case fails to load or the engine refuses
   it.
+* ``magwave gui [CASE.json]`` — opens the optional PySide6 + PyVista desktop UI with an
+  optional case JSON file (FR-061). Exit 1 with install instructions if the ``gui`` extra
+  is not installed.
 
 Still specified, still unimplemented: ``run`` / ``validate`` / ``export`` (docs/ROADMAP.md).
 """
@@ -43,10 +46,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        help="command to run (bench, solve, report; run/validate/export are not implemented yet)",
+        help="command to run (bench, solve, report, gui; run/validate/export are not implemented yet)",
     )
     parser.add_argument(
-        "case", nargs="?", default=None, help="solve/report: path to a case JSON file"
+        "case", nargs="?", default=None, help="solve/report/gui: path to a case JSON file"
     )
     parser.add_argument(
         "--json",
@@ -295,6 +298,20 @@ def _run_report(case_path: str, engine_name: str, out_path: str | None) -> int:
 
 
 # --------------------------------------------------------------------------------------
+# gui
+# --------------------------------------------------------------------------------------
+def _run_gui(case_path: str | None) -> int:
+    from .gui import MISSING_GUI_MESSAGE, MissingGuiError, launch_gui, require_gui
+
+    try:
+        require_gui()
+    except MissingGuiError:
+        print(MISSING_GUI_MESSAGE, file=sys.stderr)
+        return 1
+    return launch_gui(case_path)
+
+
+# --------------------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
@@ -305,8 +322,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.out is not None and args.command != "report":
         parser.error(f"{args.command}: --out applies to report only")
-    if args.command not in ("solve", "report") and args.case is not None:
-        parser.error(f"{args.command}: case path applies to solve and report")
+    if args.command not in ("solve", "report", "gui") and args.case is not None:
+        parser.error(f"{args.command}: case path applies to solve, report and gui")
     if args.command != "solve" and (args.grid or args.points or args.format):
         parser.error(f"{args.command}: --format, --grid and --points apply to solve")
     if args.command == "bench":
@@ -332,6 +349,10 @@ def main(argv: list[str] | None = None) -> int:
             print("magwave report: a case JSON path is required", file=sys.stderr)
             return 1
         return _run_report(args.case, args.engine or "magpylib", args.out)
+    if args.command == "gui":
+        if args.json or args.engine:
+            parser.error("gui: --json and --engine do not apply to gui")
+        return _run_gui(args.case)
     print(
         f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
         file=sys.stderr,
