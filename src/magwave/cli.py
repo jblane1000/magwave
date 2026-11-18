@@ -10,6 +10,10 @@ Implemented:
 * ``magwave solve CASE.json --format csv|json (--grid SPEC | --points SPEC)`` — samples B
   with the Tier 0 engine and prints the samples with units, engine id, version and rung
   (FR-050). Exit 2 on a malformed case or one the engine cannot model.
+* ``magwave report CASE.json [--engine magpylib] [--out PATH|-]`` — evaluates a case and
+  writes a deterministic Markdown report with provenance, probe table, corpus comparison,
+  and a final JSON block (FR-053). Exit 1 if the case fails to load or the engine refuses
+  it.
 
 Still specified, still unimplemented: ``run`` / ``validate`` / ``export`` (docs/ROADMAP.md).
 """
@@ -39,9 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        help="command to run (bench, solve; run/validate/export are not implemented yet)",
+        help="command to run (bench, solve, report; run/validate/export are not implemented yet)",
     )
-    parser.add_argument("case", nargs="?", default=None, help="solve: path to a case JSON file")
+    parser.add_argument(
+        "case", nargs="?", default=None, help="solve/report: path to a case JSON file"
+    )
     parser.add_argument(
         "--json",
         metavar="PATH",
@@ -52,7 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--engine",
         choices=ENGINES,
         default=None,
-        help="bench: evaluate the corpus through this engine instead of the analytic checks",
+        help="bench/report: evaluate with this engine (default for report: magpylib)",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="PATH",
+        default=None,
+        help="report: write Markdown report to PATH or '-' for stdout (default '-')",
     )
     parser.add_argument(
         "--format",
@@ -248,6 +260,41 @@ def _run_solve(case_path: str, points: np.ndarray, output_format: str) -> int:
 
 
 # --------------------------------------------------------------------------------------
+# report
+# --------------------------------------------------------------------------------------
+def _one_line(text: object) -> str:
+    return " ".join(str(text).splitlines())
+
+
+def _run_report(case_path: str, engine_name: str, out_path: str | None) -> int:
+    from .cases import Case, CaseError
+    from .engines.base import EngineError
+    from .report import render_report
+
+    try:
+        case = Case.from_json(Path(case_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, CaseError) as exc:
+        print(f"magwave report: {case_path}: {_one_line(exc)}", file=sys.stderr)
+        return 1
+    engine = _make_engine(engine_name)
+    try:
+        markdown = render_report(case, engine, case_file=case_path)
+    except (EngineError, CaseError) as exc:
+        print(f"magwave report: {_one_line(exc)}", file=sys.stderr)
+        return 1
+    if out_path is None or out_path == "-":
+        sys.stdout.write(markdown)
+        return 0
+    try:
+        with Path(out_path).open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(markdown)
+    except OSError as exc:
+        print(f"magwave report: {out_path}: {_one_line(exc)}", file=sys.stderr)
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
@@ -256,10 +303,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         print(f"magwave {__version__} — M1 skeleton. See docs/PRD.md.")
         return 0
-    if args.command != "solve" and (
-        args.case is not None or args.grid or args.points or args.format
-    ):
-        parser.error(f"{args.command}: case path, --format, --grid and --points apply to solve")
+    if args.out is not None and args.command != "report":
+        parser.error(f"{args.command}: --out applies to report only")
+    if args.command not in ("solve", "report") and args.case is not None:
+        parser.error(f"{args.command}: case path applies to solve and report")
+    if args.command != "solve" and (args.grid or args.points or args.format):
+        parser.error(f"{args.command}: --format, --grid and --points apply to solve")
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
@@ -276,6 +325,13 @@ def main(argv: list[str] | None = None) -> int:
         except ValueError as exc:
             parser.error(str(exc))
         return _run_solve(args.case, points, args.format or "csv")
+    if args.command == "report":
+        if args.json or args.format or args.grid or args.points:
+            parser.error("report: --json, --format, --grid and --points do not apply to report")
+        if args.case is None:
+            print("magwave report: a case JSON path is required", file=sys.stderr)
+            return 1
+        return _run_report(args.case, args.engine or "magpylib", args.out)
     print(
         f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
         file=sys.stderr,
