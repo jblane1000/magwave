@@ -1,6 +1,6 @@
 """Tier 0 Magpylib engine: cross-check against the corpus, skips, conventions, speed.
 
-The engine path evaluates the same 15 cases, expected values and research-owned
+The engine path evaluates the same 27 cases, expected values and research-owned
 tolerances as ``magwave bench``; cases the engine cannot model are skipped by its own
 ``validate()`` with a stated reason. The anti-vacuity test perturbs one expected value by
 1 % and proves the engine path reports FAIL, in the style of ``test_benchmarks.py``.
@@ -36,8 +36,13 @@ EXPECTED_SKIPS = {
     "halbach_bore_B": "E_UNSUPPORTED_GEOMETRY",
     "thin_solenoid_axis_Bz": "E_UNSUPPORTED_COIL",
     "thick_solenoid_axis_Bz": "E_UNSUPPORTED_COIL",
+    "thin_solenoid_offcentre_Bz": "E_UNSUPPORTED_COIL",
+    "thin_solenoid_outside_Bz": "E_UNSUPPORTED_COIL",
+    "thick_solenoid_outside_Bz": "E_UNSUPPORTED_COIL",
     "force_dipole_coaxial_far": "E_UNSUPPORTED_QUANTITY",
     "force_pointpole_g5L": "E_UNSUPPORTED_QUANTITY",
+    "force_dipoles_transverse": "E_UNSUPPORTED_QUANTITY",
+    "force_dipoles_oblique": "E_UNSUPPORTED_QUANTITY",
 }
 ENGINE = MagpylibEngine()
 
@@ -55,7 +60,7 @@ def test_engine_satisfies_protocol_and_declares_capabilities() -> None:
     assert caps.force_methods == ()
 
 
-def test_engine_bench_cross_checks_ten_and_skips_exactly_five() -> None:
+def test_engine_bench_cross_checks_seventeen_and_skips_exactly_ten() -> None:
     rows = run_engine_benchmarks(CASES, ENGINE)
     assert len(rows) == len(CASES)
     skipped = {row.name: row.skip.code for row in rows if row.skipped}
@@ -65,11 +70,11 @@ def test_engine_bench_cross_checks_ten_and_skips_exactly_five() -> None:
     ]
     assert not failures, f"engine cross-check failures: {failures}"
     assert engine_summary(rows) == {
-        "cross_checked": 10,
-        "passed": 10,
+        "cross_checked": 17,
+        "passed": 17,
         "failed": 0,
-        "skipped": 5,
-        "total": 15,
+        "skipped": 10,
+        "total": 27,
     }
     assert engine_all_passed(rows)
 
@@ -88,8 +93,8 @@ def test_engine_path_can_fail_a_perturbed_case() -> None:
 def test_cli_engine_bench_summary_and_exit(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["bench", "--engine", "magpylib"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[-1] == "10 cross-checked, 5 skipped"
-    assert lines[-2] == "10/10 PASS"
+    assert lines[-1] == "17 cross-checked, 10 skipped"
+    assert lines[-2] == "17/17 PASS"
     table = lines[2:-2]
     assert len(table) == len(CASES)
     for line, case in zip(table, CASES, strict=True):
@@ -110,7 +115,7 @@ def test_cli_engine_bench_json_carries_engine_provenance(tmp_path: Path) -> None
         "version": magpy.__version__,
         "rung": "second-code",
     }
-    assert payload["summary"]["skipped"] == 5
+    assert payload["summary"]["skipped"] == 10
     assert len(payload["results"]) == len(CASES)
 
 
@@ -128,7 +133,7 @@ def test_cli_engine_bench_exits_one_on_failure(
     monkeypatch.setattr(benchmarks, "load_corpus", lambda: broken)
     assert main(["bench", "--engine", "magpylib"]) == 1
     lines = capsys.readouterr().out.splitlines()
-    assert lines[-2] == "9/10 PASS"
+    assert lines[-2] == "16/17 PASS"
 
 
 def test_solve_raises_engine_error_for_unmodelled_case() -> None:
