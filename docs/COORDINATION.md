@@ -53,12 +53,20 @@ Helen (health) and Vex (trading) are not on this project.
 5. **Licence boundary is physical.** `gmsh` and Elmer are subprocesses; the CI gate enforces it.
 6. **Specs are the source of truth.** Requirement IDs (FR-###, NFR-#) are never renumbered; a withdrawn
    requirement is marked *Withdrawn* with its date.
-7. **Every implementation brief names its engine.** Cody's implementation work is written by `agy`, not
-   by Cody's own model. A brief to Cody says so explicitly — "implement via an `agy-work` brief; you
-   write the brief, run it, and verify against the acceptance command" — because an advisory rule that
-   is not in the dispatch does not fire: on 2026-11-18 an M1 job ran 66 tool calls and 184k tokens of
-   Cody's own authorship with zero `agy` calls. Cody may still patch directly for a one-line repair or
-   to fix `agy`'s own output, and says which engine produced the code.
+7. **Every implementation brief names its engine — and its tier.** Cody's implementation work is
+   written by `agy`, not by Cody's own model. A brief to Cody says so explicitly — "implement via an
+   `agy-work` brief; you write the brief, run it, and verify against the acceptance command" — because
+   an advisory rule that is not in the dispatch does not fire: on 2026-11-18 an M1 job ran 66 tool
+   calls and 184k tokens of Cody's own authorship with zero `agy` calls. Cody may still patch directly
+   for a one-line repair or to fix `agy`'s own output, and says which engine produced the code.
+8. **Tier policy (set 2026-11-18).** `agy` is free to pick the tier, but the default is fixed by job
+   class: **implementation-class work → `gemini-pro-orchestrator-g1-pro`** (Argon plans and reviews,
+   Hydrogen implements; the default for `agy-work` since this date); **small well-specified jobs →
+   `gemini-4-hydrogen-high`** (`xhigh` when gnarly); **checks and reviews → Claude**
+   (`claude-sonnet-5-5-high` quick, `claude-opus-5-5-high` deep), the scarce pool, spent on
+   verification rather than authoring; **hard design or debugging → `gemini-4-argon-high`** or
+   Orchestrator. Measured cost of the change: one M3-class feature took 8m43s and **2 Argon quota
+   points** under Orchestrator versus **47 Claude weekly points** under Opus.
 
 ## Cadence
 
