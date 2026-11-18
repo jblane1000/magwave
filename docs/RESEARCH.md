@@ -69,7 +69,7 @@ written down and re-runnable. Nobody open-source does that well today.
 |---|---|---|---|
 | PySide6 | 6.12.0 | LGPL-3.0 / GPL (dual) | Dynamic linking; ship Qt licence notices. Fine for a desktop app. |
 | PyVista | 0.49.2 | MIT | Free. |
-| Magpylib | 6.3.0 | BSD-3-Clause | Free. |
+| Magpylib | 6.3.0 | BSD-2-Clause (repository LICENSE; PyPI metadata still lists BSD-3) | Free. |
 | trimesh | 5.2.1 | MIT | Free. |
 | numpy | 2.5.5 | BSD-3 / 0BSD / MIT / Zlib | Free. |
 | scipy | 1.18.1 | BSD-3 | Free. |
