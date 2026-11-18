@@ -1,0 +1,28 @@
+name: Feature request
+description: Propose a capability — with the physics and the acceptance test.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The engineering problem
+      description: What are you trying to answer? Include a real part or case if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How would we know it works?
+      description: The benchmark or closed-form case that would prove it, and the tolerance you would accept.
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Which tier does this belong to?
+      options:
+        - Tier 0 — analytic
+        - Tier 1 — 2D / axisymmetric FEM
+        - Tier 2 — 3D FEM
+        - Tier 3 — transient / eddy
+        - Not sure

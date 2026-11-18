@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magwave"
+version = "0.0.1"
+description = "Open-source 3D magnetic field simulator for permanent magnets, coils and steel."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Jason", email = "jblane1000@gmail.com" }]
+keywords = ["magnetostatics", "magnetics", "electromagnetics", "CAD", "simulation", "physics"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+# Core only: must import without Qt, without gmsh, without Elmer.
+dependencies = [
+    "numpy>=1.26",
+    "magpylib>=6,<7",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6", "pyvista>=0.43"]
+cad = ["trimesh>=4.0"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+magwave = "magwave.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jblane1000/magwave"
+Issues = "https://github.com/jblane1000/magwave/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+magwave = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]  # long doc lines acceptable; formatting is handled by ruff format with line-length above
+
+[tool.ruff.lint.per-file-ignores]
+"docs/**" = ["ALL"]

@@ -1,0 +1,21 @@
+MagWave
+Copyright 2026 Jason (jblane1000)
+
+This product includes software developed at MagWave contributors (https://github.com/jblane1000/magwave).
+
+Third-party components used at runtime and their licences:
+
+- numpy — BSD-3-Clause
+- scipy — BSD-3-Clause (optional, Tier 1 numerics)
+- Magpylib — BSD-3-Clause (Tier 0 analytic engine)
+- PyVista — MIT (optional, GUI 3D view)
+- PySide6 / Qt — LGPL-3.0 (optional, GUI; dynamically linked; Qt licence notices shipped with binaries)
+- trimesh — MIT (optional, mesh file import)
+- OpenCASCADE via OCP — LGPL-2.1 with exception (optional, STEP/IGES import)
+
+External programs invoked as separate processes (NOT linked, NOT distributed with MagWave):
+
+- gmsh — GPLv2+ (meshing)
+- Elmer FEM — GPL (Tier 2 solver)
+
+Users who install or enable those external programs are responsible for compliance with their licences.

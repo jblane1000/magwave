@@ -1,0 +1,35 @@
+name: Bug report
+description: Something is wrong — including a number that looks wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A wrong number is more useful to us than a crash. If a field or force looks off,
+        say what you expected and on what basis (analytic, TEAM, another code, measurement).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you got, what you expected.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MagWave version
+      description: Output of `magwave --version`
+    validations:
+      required: true
+  - type: textarea
+    id: case
+    attributes:
+      label: Case file (or a minimal reproduction)
+      description: Paste the case JSON, or describe the minimal geometry. Remove anything confidential.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Commands run and their output. An agent's or a UI's summary is not evidence.
