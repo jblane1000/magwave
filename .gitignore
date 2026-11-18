@@ -22,3 +22,7 @@ Thumbs.db
 *.mw.results.json
 results/
 cases/local/
+
+# Generated document editions (deliverables, not source)
+docs/export/
+
