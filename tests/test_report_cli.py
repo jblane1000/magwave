@@ -217,8 +217,11 @@ def test_corpus_case_reports_fail_when_perturbed(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     case = CORPUS["cuboid_axis_Bz"]
-    item = case.expected[0]
-    perturbed = replace(case, expected=(replace(item, value=item.value * 1.01),))
+    magnet = case.components[0]
+    perturbed = replace(
+        case,
+        components=(replace(magnet, br=(magnet.br[0], magnet.br[1], magnet.br[2] * 1.01)),),
+    )
     case_path = _write_case(tmp_path / "perturbed.json", perturbed)
     assert main(["report", str(case_path)]) == 0
     text = capsys.readouterr().out
@@ -329,3 +332,93 @@ def test_invalid_flag_combinations_raise_argparse_error() -> None:
         with pytest.raises(SystemExit) as excinfo:
             main(argv)
         assert excinfo.value.code == 2
+
+
+def test_corpus_spoof_by_probe_point_is_flagged_as_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    case = CORPUS["dipole_axis_Bz"]
+    spoofed = replace(
+        case,
+        probes=(replace(case.probes[0], point=(0.0, 0.0, 50.0)),),
+        expected=(replace(case.expected[0], value=1.6e-12, tolerance=1e-9),),
+        tolerance=1e-9,
+    )
+    case_path = _write_case(tmp_path / "spoofed_dipole.json", spoofed)
+    assert main(["report", str(case_path)]) == 0
+    text = capsys.readouterr().out
+
+    table_lines = [line for line in text.splitlines() if line.startswith("|")]
+    assert "expected" not in table_lines[0]
+    assert "tolerance" not in table_lines[0]
+    assert "result" not in table_lines[0]
+
+    payload = _extract_final_json(text)
+    assert payload["corpus_case"] is False
+    assert payload["corpus_name_mismatch"] is True
+    assert "passed" not in payload
+    assert "result" not in payload
+    assert all(
+        "expected" not in row and "tolerance" not in row and "result" not in row
+        for row in payload["probes"]
+    )
+
+
+def test_corpus_doctored_expected_uses_corpus_authority(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    case = CORPUS["dipole_axis_Bz"]
+    doctored = replace(
+        case,
+        expected=(replace(case.expected[0], value=1.7e-06),),
+    )
+    case_path = _write_case(tmp_path / "doctored_dipole.json", doctored)
+    assert main(["report", str(case_path)]) == 0
+    text = capsys.readouterr().out
+
+    table_lines = [line for line in text.splitlines() if line.startswith("|")]
+    assert repr(1.6e-06) in table_lines[2]
+    assert repr(1.7e-06) not in table_lines[2]
+    assert "PASS" in table_lines[2]
+
+    payload = _extract_final_json(text)
+    assert payload["corpus_case"] is True
+    assert "corpus_name_mismatch" not in payload
+    assert payload["passed"] is True
+    assert payload["result"] == "PASS"
+    assert payload["probes"][0]["expected"] == 1.6e-06
+    assert payload["probes"][0]["result"] == "PASS"
+
+
+def test_report_is_cwd_independent_for_temp_case_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sub = tmp_path / "nested"
+    sub.mkdir()
+    case_path = _write_case(sub / "dipole.json", CORPUS["dipole_axis_Bz"])
+
+    monkeypatch.chdir(ROOT)
+    assert main(["report", str(case_path)]) == 0
+    md_from_root = capsys.readouterr().out
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["report", str(case_path)]) == 0
+    md_from_tmp = capsys.readouterr().out
+
+    assert md_from_root.encode("utf-8") == md_from_tmp.encode("utf-8")
+    payload_root = _extract_final_json(md_from_root)
+    payload_tmp = _extract_final_json(md_from_tmp)
+    assert payload_root["case_file"] == payload_tmp["case_file"]
+    assert payload_root["case_file"] == "dipole.json"
+    assert not Path(payload_root["case_file"]).is_absolute()
+
+
+def test_repo_relative_display_from_outside_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    assert EXAMPLE.is_absolute()
+    assert main(["report", str(EXAMPLE)]) == 0
+    text = capsys.readouterr().out
+    payload = _extract_final_json(text)
+    assert payload["case_file"] == "examples/solve-dipole.json"
