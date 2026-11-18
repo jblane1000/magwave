@@ -7,7 +7,7 @@ Third-party components used at runtime and their licences:
 
 - numpy — BSD-3-Clause
 - scipy — BSD-3-Clause (optional, Tier 1 numerics)
-- Magpylib — BSD-3-Clause (Tier 0 analytic engine)
+- Magpylib — BSD-2-Clause per its repository LICENSE (PyPI metadata lists BSD-3); Tier 0 analytic engine
 - PyVista — MIT (optional, GUI 3D view)
 - PySide6 / Qt — LGPL-3.0 (optional, GUI; dynamically linked; Qt licence notices shipped with binaries)
 - trimesh — MIT (optional, mesh file import)
