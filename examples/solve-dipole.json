@@ -1,0 +1,47 @@
+{
+  "components": [
+    {
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "moment": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "name": "m1",
+      "type": "dipole"
+    }
+  ],
+  "description": "Point dipole m = (0,0,1) A m^2 at the origin, field point 0.5 m along the axis. Hand-derived: Bz = mu0/(4pi)*(3*0.5/0.5^5 - 1/0.5^3) = mu0/(4pi)*16 = 1.6e-6 T.",
+  "expected": [
+    {
+      "check": "dipole_B",
+      "quantity": "Bz",
+      "source": "exact closed form, hand-derived in the research dossier note (a)",
+      "tolerance": 1e-09,
+      "unit": "T",
+      "value": 1.6e-06
+    }
+  ],
+  "name": "dipole_axis_Bz",
+  "probes": [
+    {
+      "component": "z",
+      "point": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "quantity": "B"
+    }
+  ],
+  "schema": "magwave.case/1",
+  "sources": [
+    "docs/research/reference_formulas.py (a) dipole_B",
+    "docs/research/validation-sources.md (a): Jackson 5.5"
+  ],
+  "tolerance": 1e-09
+}
