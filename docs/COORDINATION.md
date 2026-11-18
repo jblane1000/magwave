@@ -53,6 +53,12 @@ Helen (health) and Vex (trading) are not on this project.
 5. **Licence boundary is physical.** `gmsh` and Elmer are subprocesses; the CI gate enforces it.
 6. **Specs are the source of truth.** Requirement IDs (FR-###, NFR-#) are never renumbered; a withdrawn
    requirement is marked *Withdrawn* with its date.
+7. **Every implementation brief names its engine.** Cody's implementation work is written by `agy`, not
+   by Cody's own model. A brief to Cody says so explicitly — "implement via an `agy-work` brief; you
+   write the brief, run it, and verify against the acceptance command" — because an advisory rule that
+   is not in the dispatch does not fire: on 2026-11-18 an M1 job ran 66 tool calls and 184k tokens of
+   Cody's own authorship with zero `agy` calls. Cody may still patch directly for a one-line repair or
+   to fix `agy`'s own output, and says which engine produced the code.
 
 ## Cadence
 
