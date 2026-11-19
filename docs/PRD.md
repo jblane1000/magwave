@@ -72,15 +72,27 @@ so when the same question came back four years later, nothing from that trial co
 
 ### 6.2 Geometry and CAD import
 
-- **FR-010** Import STEP (AP203/214/242) and IGES through OpenCASCADE; STL/3MF/OBJ through trimesh.
-  **AC:** A three-body STEP assembly imports with correct per-body volumes within 0.1 % of the source CAD.
-- **FR-011** Report an import manifest: bodies found, units detected, open shells, non-manifold edges,
-  interference pairs, and bodies skipped with the reason.
-  **AC:** A deliberately broken assembly produces a manifest listing every defect; no body is dropped silently.
+- **FR-010** Import STEP (AP203/214/242) through OpenCASCADE in-process (OCP, `[step]` extra),
+  IGES as **best-effort**, and STL/3MF/OBJ/PLY/GLB through trimesh (`[mesh]` extra).
+  **AC:** A three-body STEP assembly imports with correct per-body volumes within 0.1 % of the
+  source CAD. **Measured 2026-11-19:** worst relative error `2.2e-14` on a three-body assembly
+  (ADR-0006). IGES AC: an IGES file must either yield solids or be reported as
+  `imported_as_shell` in the manifest — never silently presented as a solid. **Measured:** an
+  IGES round-trip returned 0 solids even after `ShapeFix` while the healed volume was exact, so
+  IGES carries no volume-parity claim.
+- **FR-011** Report an import manifest: bodies found, units detected, open shells, non-manifold
+  edges, interference pairs, and bodies skipped with the reason.
+  **AC:** A deliberately broken assembly produces a manifest listing every defect; no body is
+  dropped silently. **STEP reads must recurse the XCAF product tree** — a single-shape read of a
+  three-body assembly was measured to return one body of summed volume (`1948.761 mm³`), and that
+  merged case is the mandatory regression test (ADR-0006).
 - **FR-012** Boolean union/subtract and defeaturing for small features below a user threshold.
   **AC:** A part with 40 decorative fillets defeats to a clean solid and the volume change is reported.
 - **FR-013** Assign bodies to roles: permeable solid, permanent magnet, coil volume, air, symmetry plane.
-  **AC:** Unassigned bodies block the solve and are listed.
+  **AC:** Unassigned bodies block the solve and are listed. Body names are advisory only:
+  an XCAF round-trip preserved 2 of 3 names and returned one as `SOLID`, so a missing name must
+  fall back to geometry plus index and be surfaced in the manifest — never to a silent default
+  role (ADR-0006).
 
 ### 6.3 Materials
 
