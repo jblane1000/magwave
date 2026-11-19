@@ -721,6 +721,21 @@ def _build_qt_classes() -> dict[str, Any]:
             if self.case is None:
                 return None
 
+            if getattr(self.case, "manifest", None) is not None:
+                from .cad.roles import UnassignedBodiesError, require_all_assigned
+
+                try:
+                    require_all_assigned(self.case.manifest)
+                except UnassignedBodiesError as exc:
+                    self.result = None
+                    self.problems = (Problem("E_UNASSIGNED_BODIES", str(exc), "error"),)
+                    self._refresh_probes()
+                    self._refresh_problems()
+                    self._refresh_provenance()
+                    self.viewport.update_scene(self.case, result=None)
+                    self.statusBar().showMessage(f"Solve blocked: {exc}")
+                    return None
+
             validation = self.engine.validate(self.case)
             if errors_in(validation):
                 self.result = None

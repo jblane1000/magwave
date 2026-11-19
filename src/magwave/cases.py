@@ -60,6 +60,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NoReturn
 
+from .cad.manifest import Manifest
+
 SCHEMA = "magwave.case/1"
 
 MAGNET_DIMS: dict[str, tuple[str, ...]] = {
@@ -462,6 +464,7 @@ class Case:
     probes: tuple[Probe, ...]
     expected: tuple[ExpectedValue, ...]
     tolerance: float | None = None
+    manifest: Manifest | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _text(self.name, "case.name"))
@@ -518,20 +521,27 @@ class Case:
         if len(names) != len(set(names)):
             _fail("case.components", "component names must be unique within a case")
 
+        if self.manifest is not None and not isinstance(self.manifest, Manifest):
+            _fail(
+                "case.manifest",
+                f"expected Manifest or None, got {type(self.manifest).__name__}",
+            )
+
     def to_dict(self) -> dict[str, Any]:
         """Return the case as a JSON-ready dict with keys sorted at every level."""
-        return _sorted(
-            {
-                "schema": SCHEMA,
-                "name": self.name,
-                "description": self.description,
-                "sources": list(self.sources),
-                "tolerance": self.tolerance,
-                "components": [component.to_dict() for component in self.components],
-                "probes": [probe.to_dict() for probe in self.probes],
-                "expected": [item.to_dict() for item in self.expected],
-            }
-        )
+        payload: dict[str, Any] = {
+            "schema": SCHEMA,
+            "name": self.name,
+            "description": self.description,
+            "sources": list(self.sources),
+            "tolerance": self.tolerance,
+            "components": [component.to_dict() for component in self.components],
+            "probes": [probe.to_dict() for probe in self.probes],
+            "expected": [item.to_dict() for item in self.expected],
+        }
+        if self.manifest is not None:
+            payload["manifest"] = self.manifest.to_dict()
+        return _sorted(payload)
 
     @classmethod
     def from_dict(cls, data: Any) -> Case:
@@ -541,7 +551,7 @@ class Case:
             doc,
             "case",
             ("schema", "name", "description", "sources", "components", "probes", "expected"),
-            ("tolerance",),
+            ("tolerance", "manifest"),
         )
         schema = _text(doc["schema"], "case.schema")
         if schema != SCHEMA:
@@ -555,6 +565,13 @@ class Case:
             _fail("case.probes", "expected a list")
         if not isinstance(expected, Sequence) or isinstance(expected, str | bytes):
             _fail("case.expected", "expected a list")
+        raw_manifest = doc.get("manifest")
+        manifest: Manifest | None = None
+        if raw_manifest is not None:
+            try:
+                manifest = Manifest.from_dict(raw_manifest)
+            except ValueError as exc:
+                _fail("case.manifest", str(exc))
         return cls(
             name=doc["name"],
             description=doc["description"],
@@ -571,6 +588,7 @@ class Case:
                 for i, item in enumerate(expected)
             ),
             tolerance=doc.get("tolerance"),
+            manifest=manifest,
         )
 
     def to_json(self, indent: int = 2) -> str:

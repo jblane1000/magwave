@@ -333,3 +333,35 @@ def test_embedded_plotter_does_not_let_qt_shadow_pyvista_render() -> None:
             f"Qt's {name!r} shadows BasePlotter.{name}; the embedded plotter will "
             "raise TypeError during add_mesh on a real display"
         )
+
+
+def test_unassigned_manifest_blocks_gui_run_case(qtbot) -> None:
+    from dataclasses import replace
+
+    from magwave.cad import Body, Manifest
+
+    base_case = CORPUS["dipole_axis_Bz"]
+    manifest = Manifest(
+        path="assembly.step",
+        format="step",
+        units="mm",
+        bodies=[
+            Body(
+                index=0,
+                name="magnet",
+                role=None,
+                volume_mm3=1000.0,
+                solids=1,
+                bbox=(-10.0, -5.0, -2.5, 10.0, 5.0, 2.5),
+                source="step",
+            )
+        ],
+    )
+    blocked_case = replace(base_case, manifest=manifest)
+    window = MainWindow(blocked_case)
+    qtbot.addWidget(window)
+
+    assert window.run_case() is None
+    assert window.result is None
+    assert window.shown_probe_values() == ()
+    assert any("E_UNASSIGNED_BODIES" in msg for msg in window.problem_messages())
