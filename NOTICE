@@ -11,7 +11,11 @@ Third-party components used at runtime and their licences:
 - PyVista — MIT (optional, GUI 3D view)
 - PySide6 / Qt — LGPL-3.0 (optional, GUI; dynamically linked; Qt licence notices shipped with binaries)
 - trimesh — MIT (optional, mesh file import)
-- OpenCASCADE via OCP — LGPL-2.1 with exception (optional, STEP/IGES import)
+- OpenCASCADE via OCP — LGPL-2.1 with the Open CASCADE Exception v1.0 (optional, STEP/IGES import).
+  Installed as a separate Python package (`cadquery-ocp`); OCCT ships as individual shared
+  libraries that remain replaceable, and MagWave does not bundle or redistribute them.
+  The OCCT licence text is shipped with each release under `docs/licenses/`.
+  See docs/adr/0006-cad-import-dependency.md.
 
 External programs invoked as separate processes (NOT linked, NOT distributed with MagWave):
 
