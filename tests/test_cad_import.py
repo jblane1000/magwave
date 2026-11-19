@@ -10,17 +10,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from tests.fixtures.cad_builders import (
-    build_box_iges,
-    build_box_stl,
-    build_closed_box_step,
-    build_merged_compound_step,
-    build_non_manifold_step,
-    build_open_shell_step,
-    build_overlapping_step,
-    build_three_body_step,
-    build_two_body_glb,
-)
 
 from magwave.benchmarks import evaluate_with_engine, load_corpus
 from magwave.cad import (
@@ -39,6 +28,17 @@ from magwave.cad import (
 from magwave.cases import Case
 from magwave.cli import main
 from magwave.engines import MagpylibEngine
+from tests.fixtures.cad_builders import (
+    build_box_iges,
+    build_box_stl,
+    build_closed_box_step,
+    build_merged_compound_step,
+    build_non_manifold_step,
+    build_open_shell_step,
+    build_overlapping_step,
+    build_three_body_step,
+    build_two_body_glb,
+)
 
 
 def _sample_manifest(*, assigned: bool = False) -> Manifest:
