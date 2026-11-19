@@ -34,6 +34,7 @@ from magwave.gui import (  # noqa: E402
     MISSING_GUI_MESSAGE,
     MainWindow,
     Steel,
+    _build_qt_classes,
     launch_gui,
     with_component,
 )
@@ -311,3 +312,24 @@ def test_gui_cli_rejects_bench_flags_and_launches_cleanly(
     for widget in qapp.topLevelWidgets():
         if isinstance(widget, MainWindow):
             widget.close()
+
+
+def test_embedded_plotter_does_not_let_qt_shadow_pyvista_render() -> None:
+    """The embedded plotter must not inherit Qt's ``render``/``update``/``close``.
+
+    ``QVTKRenderWindowInteractor`` is a ``QWidget``, so with the naive MRO Qt's
+    ``QWidget.render`` shadows ``pyvista.BasePlotter.render``. PyVista internals
+    call ``self.parent.render()`` during ``add_mesh``; ``QWidget.render`` requires
+    a ``QPaintDevice`` argument and raises ``TypeError: not enough arguments``.
+    That only fires with a live display, so the offscreen suite never saw it.
+    This asserts the class rebinds the three colliding names, with no display needed.
+    """
+    from pyvista.plotting.plotter import BasePlotter
+
+    plotter_cls = _build_qt_classes()["EmbeddedPlotter"]
+
+    for name in ("render", "update", "close"):
+        assert getattr(plotter_cls, name) is getattr(BasePlotter, name), (
+            f"Qt's {name!r} shadows BasePlotter.{name}; the embedded plotter will "
+            "raise TypeError during add_mesh on a real display"
+        )
