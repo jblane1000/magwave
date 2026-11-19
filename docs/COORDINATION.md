@@ -67,6 +67,15 @@ Helen (health) and Vex (trading) are not on this project.
    verification rather than authoring; **hard design or debugging → `gemini-4-argon-high`** or
    Orchestrator. Measured cost of the change: one M3-class feature took 8m43s and **2 Argon quota
    points** under Orchestrator versus **47 Claude weekly points** under Opus.
+9. **Implementation is dispatched to Cody; the coordinator does not call `agy` itself.** The path is
+   Max → Cody over A2A → Cody drives `agy` → Max re-runs the acceptance command. `agy-work` invoked
+   from the coordinator is a defect, not a shortcut, because it makes the fleet's coding member
+   ornamental and removes the one hand that is supposed to author the change. The only exceptions are
+   (a) Cody's gateway is down or unreachable, reported to Jason before proceeding, and (b) a
+   one-line repair to `agy`'s own output, declared in the first line of the report. Both exceptions
+   are named at the time, never discovered later. On 2026-11-19 the M4 implementation was run
+   coordinator-side instead of through Cody: the code and its verification were sound, the hand was
+   not, and the rule above is the correction.
 
 ## Cadence
 
