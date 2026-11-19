@@ -339,33 +339,44 @@ def _build_qt_classes() -> dict[str, Any]:
 
     _, QtCore, _, QtWidgets, pv = require_gui()
 
+    from pyvista.plotting.plotter import BasePlotter
+    from pyvista.plotting.render_window_interactor import RenderWindowInteractor
+    from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
+
+    class _QtPlotter(QVTKRenderWindowInteractor, BasePlotter):
+        # ``QVTKRenderWindowInteractor`` derives from ``QWidget``, so in this MRO
+        # Qt's own ``render``/``update``/``close`` shadow ``BasePlotter``'s.
+        # PyVista internals call ``self.parent.render()`` during ``add_mesh``, and
+        # ``QWidget.render`` requires a QPaintDevice argument, which raises
+        # ``TypeError: not enough arguments``. Rebind the three colliding names to
+        # their BasePlotter implementations so the object behaves as a plotter
+        # rather than as a bare widget. See the regression test in test_gui.py.
+        render = BasePlotter.render
+        update = BasePlotter.update
+        close = BasePlotter.close
+
+        def __init__(self, widget_parent: Any = None) -> None:
+            QVTKRenderWindowInteractor.__init__(self, widget_parent)
+            BasePlotter.__init__(self)
+            self._initialized = False
+            self.ren_win = self.GetRenderWindow()
+            for renderer in self.renderers:
+                self.ren_win.AddRenderer(renderer)
+            self.iren = RenderWindowInteractor(
+                self, light_follow_camera=False, interactor=self._Iren
+            )
+            self.iren.set_render_window(self.ren_win)
+            self.reset_key_events()
+            self.iren.enable_interactor_style()
+            self.set_background(self._theme.background)
+            self._Iren.Initialize()
+            self._initialized = True
+
+        def closeEvent(self, event: Any) -> None:  # noqa: N802
+            BasePlotter.close(self)
+            QVTKRenderWindowInteractor.closeEvent(self, event)
+
     def _create_embedded_plotter(parent: Any) -> Any:
-        from pyvista.plotting.plotter import BasePlotter
-        from pyvista.plotting.render_window_interactor import RenderWindowInteractor
-        from vtkmodules.qt.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
-
-        class _QtPlotter(QVTKRenderWindowInteractor, BasePlotter):
-            def __init__(self, widget_parent: Any = None) -> None:
-                QVTKRenderWindowInteractor.__init__(self, widget_parent)
-                BasePlotter.__init__(self)
-                self._initialized = False
-                self.ren_win = self.GetRenderWindow()
-                for renderer in self.renderers:
-                    self.ren_win.AddRenderer(renderer)
-                self.iren = RenderWindowInteractor(
-                    self, light_follow_camera=False, interactor=self._Iren
-                )
-                self.iren.set_render_window(self.ren_win)
-                self.reset_key_events()
-                self.iren.enable_interactor_style()
-                self.set_background(self._theme.background)
-                self._Iren.Initialize()
-                self._initialized = True
-
-            def closeEvent(self, event: Any) -> None:  # noqa: N802
-                BasePlotter.close(self)
-                QVTKRenderWindowInteractor.closeEvent(self, event)
-
         return _QtPlotter(parent)
 
     class FieldViewport(QtWidgets.QWidget):
@@ -938,6 +949,7 @@ def _build_qt_classes() -> dict[str, Any]:
             self.viewport.close()
             super().closeEvent(event)
 
+    _QT_CLASSES["EmbeddedPlotter"] = _QtPlotter
     _QT_CLASSES["FieldViewport"] = FieldViewport
     _QT_CLASSES["MainWindow"] = MainWindow
     return _QT_CLASSES
