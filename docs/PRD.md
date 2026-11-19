@@ -88,6 +88,13 @@ so when the same question came back four years later, nothing from that trial co
   merged case is the mandatory regression test (ADR-0006).
 - **FR-012** Boolean union/subtract and defeaturing for small features below a user threshold.
   **AC:** A part with 40 decorative fillets defeats to a clean solid and the volume change is reported.
+  **Measured 2026-11-19:** satisfied by `cad/defeature.py` (`boolean_union`, `boolean_subtract`,
+  `defeature`) and manifest `DefeatureRecord`; on the 80×50×12 mm 40-hole block with 40 R0.15 mm
+  top-rim fillets (`build_filleted_block`), `defeature(..., max_feature_size_mm=2.0)` removed 40/40
+  `Torus` fillet faces (bbox diagonal `1.401256 mm`) in one OCCT `BRepAlgoAPI_Defeaturing` pass,
+  producing 1 valid solid (`BRepCheck_Analyzer.IsValid() == True`) with volume
+  `47863.8784738762 -> 47864.2831973649 mm³` (`delta +0.4047234887 mm³`, within 0.28 % of the
+  48000.0 mm³ gross block).
 - **FR-013** Assign bodies to roles: permeable solid, permanent magnet, coil volume, air, symmetry plane.
   **AC:** Unassigned bodies block the solve and are listed. Body names are advisory only:
   an XCAF round-trip preserved 2 of 3 names and returned one as `SOLID`, so a missing name must

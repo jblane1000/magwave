@@ -71,6 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="import: assign body role by index or name (repeatable)",
     )
     parser.add_argument(
+        "--defeature-below",
+        metavar="MM",
+        type=float,
+        default=None,
+        help="import: remove features smaller than MM (STEP/IGES only)",
+    )
+    parser.add_argument(
         "--engine",
         choices=ENGINES,
         default=None,
@@ -369,6 +376,15 @@ def _format_manifest_summary(manifest) -> str:
             f"  [{body.index}] {body.display_name}  role={role_text}  "
             f"solids={body.solids}  volume={body.volume_mm3:.4f} mm^3  source={body.source}"
         )
+    if manifest.defeatures:
+        lines.append(f"defeatures ({len(manifest.defeatures)}):")
+        for record in manifest.defeatures:
+            lines.append(
+                f"  [{record.body_index}] threshold={record.threshold_mm:.4f} mm  "
+                f"removed={record.features_removed}  "
+                f"volume {record.volume_before_mm3:.4f} -> {record.volume_after_mm3:.4f} mm^3 "
+                f"(delta {record.volume_delta_mm3:+.4f})"
+            )
     if manifest.defects:
         lines.append(f"defects ({len(manifest.defects)}):")
         for defect in manifest.defects:
@@ -381,7 +397,12 @@ def _format_manifest_summary(manifest) -> str:
     return "\n".join(lines)
 
 
-def _run_import(cad_path: str, json_path: str | None, role_specs: list[str]) -> int:
+def _run_import(
+    cad_path: str,
+    json_path: str | None,
+    role_specs: list[str],
+    defeature_below: float | None = None,
+) -> int:
     from .cad import MissingExtraError, assign, import_cad, unassigned
 
     try:
@@ -391,7 +412,7 @@ def _run_import(cad_path: str, json_path: str | None, role_specs: list[str]) -> 
         return 2
 
     try:
-        manifest = import_cad(cad_path)
+        manifest = import_cad(cad_path, defeature_below=defeature_below)
     except (MissingExtraError, FileNotFoundError, ValueError, OSError) as exc:
         print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
         return 1
@@ -435,6 +456,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{args.command}: --format, --grid and --points apply to solve")
     if args.command != "import" and args.role:
         parser.error(f"{args.command}: --role applies to import only")
+    if args.command != "import" and args.defeature_below is not None:
+        parser.error(f"{args.command}: --defeature-below applies to import only")
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
@@ -467,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("import: --engine does not apply to import")
         if args.case is None:
             parser.error("import: a CAD file path is required")
-        return _run_import(args.case, args.json, args.role)
+        return _run_import(args.case, args.json, args.role, args.defeature_below)
     print(
         f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
         file=sys.stderr,

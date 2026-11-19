@@ -8,7 +8,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .manifest import DEFECT_KINDS, SOURCES, Body, Defect, Manifest
+from .defeature import (
+    BooleanResult,
+    DefeatureResult,
+    FaceDescriptor,
+    boolean_subtract,
+    boolean_union,
+    defeature,
+)
+from .manifest import (
+    DEFECT_KINDS,
+    SOURCES,
+    Body,
+    DefeatureRecord,
+    Defect,
+    Manifest,
+    RemovedFeature,
+)
 from .roles import ROLES, UnassignedBodiesError, assign, require_all_assigned, unassigned
 
 STEP_FORMATS = frozenset({"step", "stp"})
@@ -34,8 +50,9 @@ def import_cad(
     *,
     format: str | None = None,
     check_interference: bool = False,
+    defeature_below: float | None = None,
 ) -> Manifest:
-    """Import a STEP, IGES, or mesh file into a :class:`Manifest` (FR-010, FR-011).
+    """Import a STEP, IGES, or mesh file into a :class:`Manifest` (FR-010, FR-011, FR-012).
 
     Raises :class:`MissingExtraError` naming ``magwave[step]`` or ``magwave[mesh]`` when
     the corresponding optional dependency is absent.
@@ -48,12 +65,20 @@ def import_cad(
     if resolved in STEP_FORMATS:
         from .step import import_step
 
-        return import_step(file_path, check_interference=check_interference)
+        return import_step(
+            file_path,
+            check_interference=check_interference,
+            defeature_below=defeature_below,
+        )
     if resolved in IGES_FORMATS:
         from .step import import_iges
 
-        return import_iges(file_path)
+        return import_iges(file_path, defeature_below=defeature_below)
     if resolved in MESH_FORMATS:
+        if defeature_below is not None:
+            raise ValueError(
+                "--defeature-below applies to STEP and IGES only; mesh files are not defeatured"
+            )
         from .mesh_io import import_mesh
 
         return import_mesh(file_path, fmt=resolved)
@@ -65,18 +90,26 @@ def import_cad(
 
 __all__ = [
     "Body",
+    "BooleanResult",
     "DEFECT_KINDS",
+    "DefeatureRecord",
+    "DefeatureResult",
     "Defect",
+    "FaceDescriptor",
     "IGES_FORMATS",
     "MESH_FORMATS",
     "Manifest",
     "MissingExtraError",
     "ROLES",
+    "RemovedFeature",
     "SOURCES",
     "STEP_FORMATS",
     "SUPPORTED_FORMATS",
     "UnassignedBodiesError",
     "assign",
+    "boolean_subtract",
+    "boolean_union",
+    "defeature",
     "import_cad",
     "require_all_assigned",
     "unassigned",
