@@ -254,6 +254,10 @@ def evaluate_with_engine(case: Case, engine: Engine) -> list[EngineCaseResult]:
     tolerance. The result is checked against the probes it claims to answer — sample count,
     point and quantity — so an engine cannot pass by answering a different question.
     """
+    if getattr(case, "manifest", None) is not None:
+        from ..cad.roles import require_all_assigned
+
+        require_all_assigned(case.manifest)
     errors = errors_in(engine.validate(case))
     if errors:
         reason = errors[0]

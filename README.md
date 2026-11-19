@@ -118,10 +118,10 @@ pytest -q
 ruff check . && ruff format --check .
 ```
 
-The GUI and CAD extras are optional and heavier:
+The GUI and CAD extras are optional and heavier (`[step]` pulls `cadquery-ocp`/VTK at ~1.2 GB installed; `[mesh]` pulls `trimesh` at ~15 MB):
 
 ```bash
-uv pip install -e ".[dev,gui,cad]"
+uv pip install -e ".[dev,gui,step,mesh]"
 ```
 
 ## Contributing

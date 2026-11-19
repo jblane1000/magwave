@@ -41,3 +41,25 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libdbus-1-3 libxrender1
           python -m pip install -e ".[dev,gui]"
           pytest -q tests/test_gui.py
+
+  cad:
+    name: cad (3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxrender1
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,step,mesh]"
+      - name: Licence boundary (NFR-3)
+        run: python tools/check_licence_boundary.py
+      - name: Tests
+        run: pytest -q
+      - name: Benchmarks (FR-070)
+        run: python -m magwave bench

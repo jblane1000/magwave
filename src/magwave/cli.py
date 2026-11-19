@@ -17,6 +17,9 @@ Implemented:
 * ``magwave gui [CASE.json]`` — opens the optional PySide6 + PyVista desktop UI with an
   optional case JSON file (FR-061). Exit 1 with install instructions if the ``gui`` extra
   is not installed.
+* ``magwave import PATH [--json MANIFEST.json] [--role INDEX=ROLE ...]`` — imports a STEP,
+  IGES, or mesh file into a manifest, optionally assigns body roles, and exits 1 if any
+  body remains unassigned or if any ``skipped_body`` defect occurred (FR-010/011/013).
 
 Still specified, still unimplemented: ``run`` / ``validate`` / ``export`` (docs/ROADMAP.md).
 """
@@ -46,16 +49,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        help="command to run (bench, solve, report, gui; run/validate/export are not implemented yet)",
+        help="command to run (bench, solve, report, gui, import; run/validate/export are not implemented yet)",
     )
     parser.add_argument(
-        "case", nargs="?", default=None, help="solve/report/gui: path to a case JSON file"
+        "case",
+        nargs="?",
+        default=None,
+        help="solve/report/gui/import: path to a case JSON or CAD file",
     )
     parser.add_argument(
         "--json",
         metavar="PATH",
         default=None,
-        help="bench: also write the results as JSON to PATH",
+        help="bench/import: write the results or manifest as JSON to PATH",
+    )
+    parser.add_argument(
+        "--role",
+        action="append",
+        metavar="INDEX=ROLE",
+        default=[],
+        help="import: assign body role by index or name (repeatable)",
     )
     parser.add_argument(
         "--engine",
@@ -240,6 +253,14 @@ def _run_solve(case_path: str, points: np.ndarray, output_format: str) -> int:
     except (OSError, UnicodeDecodeError, CaseError) as exc:
         print(f"magwave solve: {case_path}: {exc}", file=sys.stderr)
         return 2
+    if case.manifest is not None:
+        from .cad.roles import UnassignedBodiesError, require_all_assigned
+
+        try:
+            require_all_assigned(case.manifest)
+        except UnassignedBodiesError as exc:
+            print(f"magwave solve: {exc}", file=sys.stderr)
+            return 2
     engine = MagpylibEngine()
     problems = engine.validate(case)
     errors = errors_in(problems)
@@ -279,6 +300,14 @@ def _run_report(case_path: str, engine_name: str, out_path: str | None) -> int:
     except (OSError, UnicodeDecodeError, CaseError) as exc:
         print(f"magwave report: {case_path}: {_one_line(exc)}", file=sys.stderr)
         return 1
+    if case.manifest is not None:
+        from .cad.roles import UnassignedBodiesError, require_all_assigned
+
+        try:
+            require_all_assigned(case.manifest)
+        except UnassignedBodiesError as exc:
+            print(f"magwave report: {_one_line(exc)}", file=sys.stderr)
+            return 1
     engine = _make_engine(engine_name)
     try:
         markdown = render_report(case, engine, case_file=case_path)
@@ -312,6 +341,84 @@ def _run_gui(case_path: str | None) -> int:
 
 
 # --------------------------------------------------------------------------------------
+# import
+# --------------------------------------------------------------------------------------
+def _parse_role_specs(specs: list[str]) -> dict[int | str, str]:
+    mapping: dict[int | str, str] = {}
+    for spec in specs:
+        if "=" not in spec:
+            raise ValueError(f"--role: expected INDEX=ROLE, got {spec!r}")
+        raw_key, raw_role = spec.split("=", 1)
+        key_text = raw_key.strip()
+        role_text = raw_role.strip()
+        if not key_text or not role_text:
+            raise ValueError(f"--role: expected INDEX=ROLE, got {spec!r}")
+        key: int | str = int(key_text) if key_text.isdigit() else key_text
+        mapping[key] = role_text
+    return mapping
+
+
+def _format_manifest_summary(manifest) -> str:
+    lines = [
+        f"path: {manifest.path}",
+        f"format: {manifest.format}  units: {manifest.units}  bodies: {len(manifest.bodies)}",
+    ]
+    for body in manifest.bodies:
+        role_text = body.role if body.role is not None else "<unassigned>"
+        lines.append(
+            f"  [{body.index}] {body.display_name}  role={role_text}  "
+            f"solids={body.solids}  volume={body.volume_mm3:.4f} mm^3  source={body.source}"
+        )
+    if manifest.defects:
+        lines.append(f"defects ({len(manifest.defects)}):")
+        for defect in manifest.defects:
+            target = f"body #{defect.body_index}" if defect.body_index is not None else "global"
+            lines.append(f"  - {defect.kind} ({target}): {defect.detail}")
+    if manifest.warnings:
+        lines.append(f"warnings ({len(manifest.warnings)}):")
+        for warning in manifest.warnings:
+            lines.append(f"  - {warning}")
+    return "\n".join(lines)
+
+
+def _run_import(cad_path: str, json_path: str | None, role_specs: list[str]) -> int:
+    from .cad import MissingExtraError, assign, import_cad, unassigned
+
+    try:
+        mapping = _parse_role_specs(role_specs)
+    except ValueError as exc:
+        print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
+        return 2
+
+    try:
+        manifest = import_cad(cad_path)
+    except (MissingExtraError, FileNotFoundError, ValueError, OSError) as exc:
+        print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
+        return 1
+
+    if mapping:
+        try:
+            assign(manifest, mapping)
+        except (ValueError, TypeError) as exc:
+            print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
+            return 1
+
+    print(_format_manifest_summary(manifest))
+
+    if json_path is not None:
+        try:
+            Path(json_path).write_text(manifest.to_json() + "\n", encoding="utf-8")
+        except OSError as exc:
+            print(f"magwave import: {json_path}: {_one_line(exc)}", file=sys.stderr)
+            return 1
+
+    has_skipped = any(defect.kind == "skipped_body" for defect in manifest.defects)
+    if unassigned(manifest) or has_skipped:
+        return 1
+    return 0
+
+
+# --------------------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
@@ -322,10 +429,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.out is not None and args.command != "report":
         parser.error(f"{args.command}: --out applies to report only")
-    if args.command not in ("solve", "report", "gui") and args.case is not None:
-        parser.error(f"{args.command}: case path applies to solve, report and gui")
+    if args.command not in ("solve", "report", "gui", "import") and args.case is not None:
+        parser.error(f"{args.command}: case path applies to solve, report, gui and import")
     if args.command != "solve" and (args.grid or args.points or args.format):
         parser.error(f"{args.command}: --format, --grid and --points apply to solve")
+    if args.command != "import" and args.role:
+        parser.error(f"{args.command}: --role applies to import only")
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
@@ -353,6 +462,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.json or args.engine:
             parser.error("gui: --json and --engine do not apply to gui")
         return _run_gui(args.case)
+    if args.command == "import":
+        if args.engine:
+            parser.error("import: --engine does not apply to import")
+        if args.case is None:
+            parser.error("import: a CAD file path is required")
+        return _run_import(args.case, args.json, args.role)
     print(
         f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
         file=sys.stderr,
