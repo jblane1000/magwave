@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .manifest import Body, Defect, Manifest
+from .manifest import Body, DefeatureRecord, Defect, Manifest, RemovedFeature
 
 _UNNAMED_SENTINELS = frozenset({"SOLID", "SHELL", "COMPOUND", "NONE"})
 _OCCT_TRANSLATOR_PREFIX = "Open CASCADE STEP translator"
@@ -199,8 +199,13 @@ def _step_file_units(ocp: dict[str, Any], reader: Any) -> tuple[str, list[str]]:
     return "mm", warnings
 
 
-def import_step(path: str | Path, *, check_interference: bool = False) -> Manifest:
-    """Import a STEP file via XCAF product-tree traversal (FR-010, FR-011, ADR-0006)."""
+def import_step(
+    path: str | Path,
+    *,
+    check_interference: bool = False,
+    defeature_below: float | None = None,
+) -> Manifest:
+    """Import a STEP file via XCAF product-tree traversal (FR-010, FR-011, FR-012, ADR-0006)."""
     file_path = Path(path)
     if not file_path.is_file():
         raise FileNotFoundError(f"STEP file not found: {file_path}")
@@ -369,6 +374,42 @@ def import_step(path: str | Path, *, check_interference: bool = False) -> Manife
         for i in range(1, tops.Length() + 1):
             walk(tops.Value(i), identity)
 
+    defeatures: list[DefeatureRecord] = []
+    if defeature_below is not None:
+        from .defeature import defeature
+
+        for idx, shp in enumerate(body_shapes):
+            res = defeature(shp, max_feature_size_mm=defeature_below)
+            body_shapes[idx] = res.shape
+            old_body = bodies[idx]
+            bodies[idx] = Body(
+                index=old_body.index,
+                name=old_body.name,
+                role=old_body.role,
+                volume_mm3=res.volume_after,
+                solids=old_body.solids,
+                bbox=_shape_bbox(ocp, res.shape),
+                source=old_body.source,
+            )
+            defeatures.append(
+                DefeatureRecord(
+                    body_index=old_body.index,
+                    threshold_mm=res.threshold_mm,
+                    features_removed=res.features_removed,
+                    volume_before_mm3=res.volume_before,
+                    volume_after_mm3=res.volume_after,
+                    volume_delta_mm3=res.volume_delta,
+                    removed_features=[
+                        RemovedFeature(surface_type=item.surface_type, size_mm=item.size_mm)
+                        for item in res.removed_features
+                    ],
+                )
+            )
+            for defect in res.defects:
+                defects.append(
+                    Defect(kind=defect.kind, detail=defect.detail, body_index=old_body.index)
+                )
+
     if check_interference and len(body_shapes) > 1:
         for i in range(len(body_shapes)):
             for j in range(i + 1, len(body_shapes)):
@@ -397,11 +438,12 @@ def import_step(path: str | Path, *, check_interference: bool = False) -> Manife
         bodies=bodies,
         defects=defects,
         warnings=warnings,
+        defeatures=defeatures,
     )
 
 
-def import_iges(path: str | Path) -> Manifest:
-    """Best-effort IGES import with ShapeFix + sewing (FR-010, ADR-0006)."""
+def import_iges(path: str | Path, *, defeature_below: float | None = None) -> Manifest:
+    """Best-effort IGES import with ShapeFix + sewing (FR-010, FR-012, ADR-0006)."""
     file_path = Path(path)
     if not file_path.is_file():
         raise FileNotFoundError(f"IGES file not found: {file_path}")
@@ -463,6 +505,39 @@ def import_iges(path: str | Path) -> Manifest:
         )
     )
 
+    defeatures: list[DefeatureRecord] = []
+    if defeature_below is not None:
+        from .defeature import defeature
+
+        res = defeature(healed, max_feature_size_mm=defeature_below)
+        healed = res.shape
+        old_body = bodies[0]
+        bodies[0] = Body(
+            index=old_body.index,
+            name=old_body.name,
+            role=old_body.role,
+            volume_mm3=res.volume_after,
+            solids=old_body.solids,
+            bbox=_shape_bbox(ocp, healed),
+            source=old_body.source,
+        )
+        defeatures.append(
+            DefeatureRecord(
+                body_index=0,
+                threshold_mm=res.threshold_mm,
+                features_removed=res.features_removed,
+                volume_before_mm3=res.volume_before,
+                volume_after_mm3=res.volume_after,
+                volume_delta_mm3=res.volume_delta,
+                removed_features=[
+                    RemovedFeature(surface_type=item.surface_type, size_mm=item.size_mm)
+                    for item in res.removed_features
+                ],
+            )
+        )
+        for defect in res.defects:
+            defects.append(Defect(kind=defect.kind, detail=defect.detail, body_index=0))
+
     if solids == 0:
         defects.append(
             Defect(
@@ -497,4 +572,5 @@ def import_iges(path: str | Path) -> Manifest:
         bodies=bodies,
         defects=defects,
         warnings=warnings,
+        defeatures=defeatures,
     )

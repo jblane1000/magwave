@@ -13,4 +13,6 @@ Milestones are gates, not dates. A milestone closes only when its exit criterion
 | **M6** | v0.1 release | packaging (Linux/Windows), docs, first public release | PRD §9 acceptance gate |
 | **M7** | Tier 2 3D | Elmer/NGSolve adapter, TEAM 20, open boundary | TEAM 20 within published scatter |
 
+FR-012 closed 2026-11-19 with `src/magwave/cad/defeature.py` (`boolean_union`, `boolean_subtract`, `defeature`), manifest `DefeatureRecord` reporting, `--defeature-below` CLI wiring, and the 40-fillet regression test in `tests/test_defeature.py` (completing M4).
+
 Deliberately after v0.1: parametric sweeps UI, coil editor, phasor/eddy (Tier 3), scripting recipes.

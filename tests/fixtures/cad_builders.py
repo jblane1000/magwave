@@ -216,3 +216,87 @@ def build_two_body_glb(out_path: Path) -> Path:
     scene.add_geometry(m2, node_name="yoke", geom_name="yoke")
     scene.export(str(out_path))
     return out_path
+
+
+def build_filleted_block() -> object:
+    """Build an 80x50x12 mm block with 40 through-holes and 40 R0.15 mm top-rim fillets."""
+    from OCP.BRepAdaptor import BRepAdaptor_Curve
+    from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
+    from OCP.GeomAbs import GeomAbs_Circle
+    from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    block = BRepPrimAPI_MakeBox(gp_Pnt(0.0, 0.0, 0.0), 80.0, 50.0, 12.0).Shape()
+    cylinders = []
+    for i in range(8):
+        for j in range(5):
+            x = 10.0 + i * 8.6
+            y = 9.0 + j * 8.0
+            ax = gp_Ax2(gp_Pnt(x, y, -1.0), gp_Dir(0.0, 0.0, 1.0))
+            cylinders.append(BRepPrimAPI_MakeCylinder(ax, 0.3, 14.0).Shape())
+
+    fused = cylinders[0]
+    for cyl in cylinders[1:]:
+        fused = BRepAlgoAPI_Fuse(fused, cyl).Shape()
+    cut = BRepAlgoAPI_Cut(block, fused).Shape()
+
+    fillet = BRepFilletAPI_MakeFillet(cut)
+    exp = TopExp_Explorer(cut, TopAbs_EDGE)
+    while exp.More():
+        edge = TopoDS.Edge(exp.Current())
+        curve = BRepAdaptor_Curve(edge)
+        if curve.GetType() == GeomAbs_Circle:
+            circ = curve.Circle()
+            if abs(circ.Radius() - 0.3) < 1e-6 and abs(circ.Location().Z() - 12.0) < 1e-6:
+                fillet.Add(0.15, edge)
+        exp.Next()
+    fillet.Build()
+    if not fillet.IsDone():
+        raise RuntimeError("BRepFilletAPI_MakeFillet failed for build_filleted_block")
+    return fillet.Shape()
+
+
+def build_filleted_step(out_path: Path) -> Path:
+    """Write the 40-fillet block to a single-part STEP file."""
+    return _write_step_parts(
+        out_path, [("filleted_block", build_filleted_block())], as_assembly=False
+    )
+
+
+def build_corner_filleted_block(radius: float = 0.5) -> object:
+    """80x50x12 mm block with the four vertical edges filleted at ``radius``."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    shape = BRepPrimAPI_MakeBox(80.0, 50.0, 12.0).Shape()
+    fillet = BRepFilletAPI_MakeFillet(shape)
+    chosen = []
+    exp = TopExp_Explorer(shape, TopAbs_EDGE)
+    while exp.More():
+        edge = TopoDS.Edge(exp.Current())
+        bnd = Bnd_Box()
+        BRepBndLib.Add_s(edge, bnd)
+        mn = bnd.CornerMin()
+        mx = bnd.CornerMax()
+        if (
+            abs(mx.Z() - mn.Z()) > 11.0
+            and abs(mx.X() - mn.X()) < 1e-6
+            and abs(mx.Y() - mn.Y()) < 1e-6
+            and not any(edge.IsSame(seen) for seen in chosen)
+        ):
+            chosen.append(edge)
+            fillet.Add(radius, edge)
+        exp.Next()
+    fillet.Build()
+    if not fillet.IsDone():
+        raise RuntimeError("BRepFilletAPI_MakeFillet failed for build_corner_filleted_block")
+    return fillet.Shape()

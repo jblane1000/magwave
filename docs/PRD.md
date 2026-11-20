@@ -88,6 +88,22 @@ so when the same question came back four years later, nothing from that trial co
   merged case is the mandatory regression test (ADR-0006).
 - **FR-012** Boolean union/subtract and defeaturing for small features below a user threshold.
   **AC:** A part with 40 decorative fillets defeats to a clean solid and the volume change is reported.
+  **Measured 2026-11-19:** satisfied by `cad/defeature.py` (`boolean_union`, `boolean_subtract`,
+  `defeature`) and manifest `DefeatureRecord`. Candidate faces are sized by local characteristic
+  size — `GeomAbs_Cylinder` radius, `GeomAbs_Torus` minor radius, `GeomAbs_Sphere` radius, and
+  bounding-box diagonal fallback for other non-planar faces (`GeomAbs_Plane` excluded) — while
+  complete-revolution faces (`u` span `>= 2π - 1e-6` on cylinders, `v` span `>= 2π - 1e-6` on tori,
+  `v` span `>= π - 1e-6` on spheres) are excluded so functional bores and bosses are never removed.
+  On the 80×50×12 mm 40-hole block with 40 R0.15 mm top-rim fillets (`build_filleted_block`, `v`
+  span `0.5π`), `defeature(..., max_feature_size_mm=2.0)` removed 40/40 `Torus` fillet faces
+  (`size_mm == 0.15 mm`), keeping all 40 R0.30 mm (`2π` `u` span) cylindrical bore walls, producing
+  1 valid solid (`BRepCheck_Analyzer.IsValid() == True`) with volume
+  `47863.8784738762 -> 47864.2831973649 mm³` (`delta +0.4047234887 mm³`, within 0.28 % of the
+  48000.0 mm³ gross block). On the 80×50×12 mm block with 4 R0.50 mm vertical corner fillets
+  (`build_corner_filleted_block`, `u` span `0.5π`), `defeature(..., max_feature_size_mm=2.0)`
+  removed 4/4 `Cylinder` fillet faces (`size_mm == 0.50 mm`), producing 1 valid solid
+  (`BRepCheck_Analyzer.IsValid() == True`) with volume
+  `47997.4247779608 -> 48000.0000000000 mm³` (`delta +2.5752220392 mm³`).
 - **FR-013** Assign bodies to roles: permeable solid, permanent magnet, coil volume, air, symmetry plane.
   **AC:** Unassigned bodies block the solve and are listed. Body names are advisory only:
   an XCAF round-trip preserved 2 of 3 names and returned one as `SOLID`, so a missing name must

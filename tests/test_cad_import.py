@@ -16,9 +16,11 @@ from magwave.cad import (
     DEFECT_KINDS,
     ROLES,
     Body,
+    DefeatureRecord,
     Defect,
     Manifest,
     MissingExtraError,
+    RemovedFeature,
     UnassignedBodiesError,
     assign,
     import_cad,
@@ -32,6 +34,7 @@ from tests.fixtures.cad_builders import (
     build_box_iges,
     build_box_stl,
     build_closed_box_step,
+    build_filleted_step,
     build_merged_compound_step,
     build_non_manifold_step,
     build_open_shell_step,
@@ -152,6 +155,40 @@ def test_manifest_json_roundtrip_is_byte_stable() -> None:
     second = restored.to_json()
     assert restored == manifest
     assert first == second
+    assert "defeatures" not in json.loads(first)
+
+
+def test_manifest_defeature_record_roundtrip_and_legacy_load() -> None:
+    base = _sample_manifest(assigned=False)
+    legacy_payload = json.loads(base.to_json())
+    assert "defeatures" not in legacy_payload
+    assert Manifest.from_dict(legacy_payload) == base
+
+    with_defeature = Manifest(
+        path=base.path,
+        format=base.format,
+        units=base.units,
+        bodies=base.bodies,
+        defects=base.defects,
+        warnings=base.warnings,
+        defeatures=[
+            DefeatureRecord(
+                body_index=0,
+                threshold_mm=2.0,
+                features_removed=2,
+                volume_before_mm3=999.0,
+                volume_after_mm3=1000.0,
+                volume_delta_mm3=1.0,
+                removed_features=[
+                    RemovedFeature(surface_type="Torus", size_mm=1.4),
+                    RemovedFeature(surface_type="Torus", size_mm=1.4),
+                ],
+            )
+        ],
+    )
+    serialised = with_defeature.to_json()
+    assert "defeatures" in json.loads(serialised)
+    assert Manifest.from_json(serialised) == with_defeature
 
 
 def test_body_display_name_fallback_keeps_dataclass_name_none() -> None:
@@ -341,6 +378,10 @@ def test_remaining_defect_kinds_non_manifold_merged_and_interference(tmp_path: P
     assert "500.0000" in next(d.detail for d in interf_manifest.defects if d.kind == "interference")
 
     # Confirm our entire test suite covers every defined Defect.kind
+    df_defect = Defect(kind="defeature_failed", detail="sample failure", body_index=0)
+    assert df_defect.kind == "defeature_failed"
+    di_defect = Defect(kind="defeature_invalid", detail="sample invalid", body_index=0)
+    assert di_defect.kind == "defeature_invalid"
     seen_kinds = {
         "open_shell",
         "non_manifold_edge",
@@ -349,6 +390,8 @@ def test_remaining_defect_kinds_non_manifold_merged_and_interference(tmp_path: P
         "unnamed_body",
         "imported_as_shell",
         "interference",
+        "defeature_failed",
+        "defeature_invalid",
     }
     assert seen_kinds == set(DEFECT_KINDS)
 
@@ -382,6 +425,14 @@ def test_mesh_scene_imports_named_geometries(tmp_path: Path) -> None:
     assert set(by_name) == {"core", "yoke"}
     assert by_name["core"].volume_mm3 == pytest.approx(1000.0, rel=1e-4)
     assert by_name["yoke"].volume_mm3 == pytest.approx(120.0, rel=1e-4)
+
+
+def test_mesh_import_rejects_defeature_below(tmp_path: Path) -> None:
+    pytest.importorskip("trimesh")
+
+    stl_path = build_box_stl(tmp_path / "magnet.stl")
+    with pytest.raises(ValueError, match="STEP and IGES only"):
+        import_cad(stl_path, defeature_below=1.0)
 
 
 # --------------------------------------------------------------------------------------
@@ -433,3 +484,73 @@ def test_cli_import_step_roles_and_exit_codes(
     open_path = build_open_shell_step(tmp_path / "open.step")
     assert main(["import", str(open_path)]) == 1
     _ = capsys.readouterr()
+
+
+def test_cli_import_step_defeature_below(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("OCP")
+
+    step = build_filleted_step(tmp_path / "filleted.step")
+    out_defeatured = tmp_path / "defeatured.json"
+    out_plain = tmp_path / "plain.json"
+
+    rc = main(
+        [
+            "import",
+            str(step),
+            "--json",
+            str(out_defeatured),
+            "--defeature-below",
+            "2.0",
+            "--role",
+            "0=permeable_solid",
+        ]
+    )
+    stdout = capsys.readouterr().out
+    assert rc == 0
+    assert "defeatures (1):" in stdout
+    payload = json.loads(out_defeatured.read_text(encoding="utf-8"))
+    assert len(payload["defeatures"]) == 1
+    rec = payload["defeatures"][0]
+    assert rec["features_removed"] >= 30
+    assert rec["volume_after_mm3"] == pytest.approx(48000.0, rel=0.01)
+    assert payload["bodies"][0]["volume_mm3"] == rec["volume_after_mm3"]
+
+    rc_plain = main(
+        [
+            "import",
+            str(step),
+            "--json",
+            str(out_plain),
+            "--role",
+            "0=permeable_solid",
+        ]
+    )
+    _ = capsys.readouterr()
+    assert rc_plain == 0
+    plain_payload = json.loads(out_plain.read_text(encoding="utf-8"))
+    assert "defeatures" not in plain_payload
+
+
+def test_cli_import_ocp_failure_is_clean_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F2: OCP exceptions during `magwave import` exit 1 with a single-line error."""
+    import magwave.cad as cad
+    from magwave.cli import _is_ocp_failure
+
+    assert not _is_ocp_failure(ValueError("not ocp"))
+
+    fake_exc = type("Standard_Failure", (Exception,), {"__module__": "OCP.OCP.Standard"})
+
+    def _boom(*_args, **_kwargs):
+        raise fake_exc("boom from OCCT")
+
+    monkeypatch.setattr(cad, "import_cad", _boom)
+    rc = main(["import", str(tmp_path / "x.step")])
+    err = capsys.readouterr().err
+
+    assert rc == 1
+    assert "magwave import: boom from OCCT" in err
+    assert "Traceback" not in err
