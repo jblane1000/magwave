@@ -11,6 +11,7 @@ from __future__ import annotations
 from .harness import (
     CORPUS_SCHEMA,
     RESULTS_SCHEMA,
+    AccuracyRow,
     CaseResult,
     EngineCaseResult,
     all_passed,
@@ -21,15 +22,18 @@ from .harness import (
     engine_summary,
     evaluate,
     evaluate_with_engine,
+    format_accuracy_table,
     format_engine_table,
     format_table,
     load_corpus,
+    measure_engine_accuracy,
     results_payload,
     run_benchmarks,
     run_engine_benchmarks,
 )
 
 __all__ = [
+    "AccuracyRow",
     "CORPUS_SCHEMA",
     "RESULTS_SCHEMA",
     "CaseResult",
@@ -42,9 +46,11 @@ __all__ = [
     "engine_summary",
     "evaluate",
     "evaluate_with_engine",
+    "format_accuracy_table",
     "format_engine_table",
     "format_table",
     "load_corpus",
+    "measure_engine_accuracy",
     "results_payload",
     "run_benchmarks",
     "run_engine_benchmarks",

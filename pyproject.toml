@@ -28,6 +28,7 @@ classifiers = [
 # Core only: must import without Qt, without gmsh, without Elmer.
 dependencies = [
     "numpy>=1.26",
+    "scipy>=1.11",
     "magpylib>=6,<7",
 ]
 

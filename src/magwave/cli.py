@@ -36,7 +36,7 @@ import numpy as np
 
 from . import __version__
 
-ENGINES = ("magpylib",)
+ENGINES = ("magpylib", "fem2d")
 FORMATS = ("csv", "json")
 SAMPLES_SCHEMA = "magwave.samples/1"
 #: Grid end points are inclusive when within this distance (metres) of the last step.
@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ENGINES,
         default=None,
         help="bench/report: evaluate with this engine (default for report: magpylib)",
+    )
+    parser.add_argument(
+        "--report-accuracy",
+        action="store_true",
+        help="bench --engine: also measure and report relative error on accuracy-gated cases",
     )
     parser.add_argument(
         "--out",
@@ -130,13 +135,17 @@ def _run_bench(json_path: str | None) -> int:
     return 0 if all_passed(results) else 1
 
 
-def _run_engine_bench(engine_name: str, json_path: str | None) -> int:
+def _run_engine_bench(
+    engine_name: str, json_path: str | None, *, report_accuracy: bool = False
+) -> int:
     from .benchmarks import (
         engine_all_passed,
         engine_results_payload,
         engine_summary,
+        format_accuracy_table,
         format_engine_table,
         load_corpus,
+        measure_engine_accuracy,
         run_engine_benchmarks,
     )
 
@@ -157,6 +166,16 @@ def _run_engine_bench(engine_name: str, json_path: str | None) -> int:
     print(f"{summary['cross_checked']} cross-checked, {summary['skipped']} skipped")
     if json_path:
         _write_json(json_path, engine_results_payload(rows, engine))
+    if report_accuracy:
+        acc_rows = measure_engine_accuracy(cases, engine)
+        print()
+        print(format_accuracy_table(acc_rows))
+        worst = max((row.rel_err for row in acc_rows), default=0.0)
+        certified = float(getattr(engine, "certified_accuracy", 1e-2))
+        print(
+            f"measured: {len(acc_rows)} case(s), worst rel.err {worst:.2e}, certified {certified:.2e}"
+        )
+        return 0 if (len(acc_rows) > 0 and all(row.within for row in acc_rows)) else 1
     return 0 if engine_all_passed(rows) else 1
 
 
@@ -165,6 +184,10 @@ def _make_engine(name: str):
         from .engines.magpylib_engine import MagpylibEngine
 
         return MagpylibEngine()
+    if name == "fem2d":
+        from .fem2d.engine import Fem2dEngine
+
+        return Fem2dEngine()
     raise ValueError(f"unknown engine {name!r}")  # pragma: no cover - argparse choices
 
 
@@ -472,10 +495,12 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{args.command}: --role applies to import only")
     if args.command != "import" and args.defeature_below is not None:
         parser.error(f"{args.command}: --defeature-below applies to import only")
+    if args.report_accuracy and (args.command != "bench" or args.engine is None):
+        parser.error("--report-accuracy is valid only together with bench --engine")
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
-        return _run_engine_bench(args.engine, args.json)
+        return _run_engine_bench(args.engine, args.json, report_accuracy=args.report_accuracy)
     if args.command == "solve":
         if args.case is None:
             parser.error("solve: a case JSON path is required")

@@ -25,6 +25,7 @@ __all__ = [
     "Capabilities",
     "Engine",
     "EngineError",
+    "Fem2dEngine",
     "MagpylibEngine",
     "Problem",
     "Result",
@@ -40,4 +41,8 @@ def __getattr__(name: str) -> Any:
         from .magpylib_engine import MagpylibEngine
 
         return MagpylibEngine
+    if name == "Fem2dEngine":
+        from ..fem2d.engine import Fem2dEngine
+
+        return Fem2dEngine
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
