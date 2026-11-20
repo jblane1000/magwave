@@ -6,7 +6,7 @@ This product includes software developed at MagWave contributors (https://github
 Third-party components used at runtime and their licences:
 
 - numpy — BSD-3-Clause
-- scipy — BSD-3-Clause (optional, Tier 1 numerics)
+- scipy — BSD-3-Clause (core dependency from M5: sparse linear algebra for the Tier 1 FEM solver)
 - Magpylib — BSD-2-Clause per its repository LICENSE (PyPI metadata lists BSD-3); Tier 0 analytic engine
 - PyVista — MIT (optional, GUI 3D view)
 - PySide6 / Qt — LGPL-3.0 (optional, GUI; dynamically linked; Qt licence notices shipped with binaries)

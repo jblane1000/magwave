@@ -17,7 +17,7 @@ tolerances through an :class:`~magwave.engines.base.Engine` instead of ``checks.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -396,3 +396,88 @@ def engine_results_payload(rows: list[EngineCaseResult], engine: Engine) -> dict
         "results": [row.to_dict() for row in rows],
         "summary": engine_summary(rows),
     }
+
+
+@dataclass(frozen=True)
+class AccuracyRow:
+    """Measured accuracy for a case blocked only by ``E_ACCURACY_UNREACHABLE``."""
+
+    name: str
+    check: str
+    computed: float
+    expected: float
+    rel_err: float
+    tolerance: float
+    certified_accuracy: float
+    within: bool
+
+
+def measure_engine_accuracy(cases: list[Case], engine: Engine) -> list[AccuracyRow]:
+    """For each case whose ``validate()`` fails ONLY with ``E_ACCURACY_UNREACHABLE``, solve it
+    anyway (without altering the research-owned case tolerance) and record the measured
+    relative error. Cases the engine cannot model at all are omitted.
+    """
+    certified_accuracy = float(getattr(engine, "certified_accuracy", 1e-2))
+    rows: list[AccuracyRow] = []
+
+    for case in cases:
+        if getattr(case, "manifest", None) is not None:
+            from ..cad.roles import require_all_assigned
+
+            require_all_assigned(case.manifest)
+
+        errors = errors_in(engine.validate(case))
+        if not errors or any(err.code != "E_ACCURACY_UNREACHABLE" for err in errors):
+            continue
+
+        relaxed_expected = tuple(
+            replace(item, tolerance=max(item.tolerance, certified_accuracy))
+            for item in case.expected
+        )
+        relaxed_case = replace(
+            case,
+            expected=relaxed_expected,
+            tolerance=min(item.tolerance for item in relaxed_expected),
+        )
+        result = engine.solve(relaxed_case)
+
+        for position, item in enumerate(case.expected):
+            index = _probe_index(case, position)
+            sample = result.samples[index]
+            if sample.unit != item.unit:
+                raise CaseError(
+                    f"{case.name}: expected value is in {item.unit!r} but the engine sample is "
+                    f"in {sample.unit!r}"
+                )
+            computed = result.value(index, case.probes[index].component)
+            rel_err, within = _compare(computed, item.value, certified_accuracy)
+            rows.append(
+                AccuracyRow(
+                    name=case.name,
+                    check=item.check,
+                    computed=computed,
+                    expected=item.value,
+                    rel_err=rel_err,
+                    tolerance=item.tolerance,
+                    certified_accuracy=certified_accuracy,
+                    within=within,
+                )
+            )
+
+    return rows
+
+
+def format_accuracy_table(rows: list[AccuracyRow]) -> str:
+    """Render an aligned table of measured errors vs case and certified tolerances."""
+    header = (
+        f"{'case':<32} | {'computed':>16} | {'expected':>16} | {'rel.err':>9} | "
+        f"{'case.tol':>8} | {'cert.tol':>8} | within"
+    )
+    lines = [header, "-" * len(header)]
+    for row in rows:
+        lines.append(
+            f"{row.name:<32} | {row.computed:>16.9e} | {row.expected:>16.9e} | "
+            f"{row.rel_err:>9.2e} | {row.tolerance:>8.0e} | {row.certified_accuracy:>8.0e} | "
+            f"{'PASS' if row.within else 'FAIL'}"
+        )
+    return "\n".join(lines)
