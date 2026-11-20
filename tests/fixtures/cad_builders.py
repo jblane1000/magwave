@@ -263,3 +263,38 @@ def build_filleted_block() -> object:
 def build_filleted_step(out_path: Path) -> Path:
     """Write the 40-fillet block to a single-part STEP file."""
     return _write_step_parts(out_path, [("filleted_block", build_filleted_block())], as_assembly=False)
+
+
+def build_corner_filleted_block(radius: float = 0.5) -> object:
+    """80x50x12 mm block with the four vertical edges filleted at ``radius``."""
+    from OCP.Bnd import Bnd_Box
+    from OCP.BRepBndLib import BRepBndLib
+    from OCP.BRepFilletAPI import BRepFilletAPI_MakeFillet
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.TopAbs import TopAbs_EDGE
+    from OCP.TopExp import TopExp_Explorer
+    from OCP.TopoDS import TopoDS
+
+    shape = BRepPrimAPI_MakeBox(80.0, 50.0, 12.0).Shape()
+    fillet = BRepFilletAPI_MakeFillet(shape)
+    chosen = []
+    exp = TopExp_Explorer(shape, TopAbs_EDGE)
+    while exp.More():
+        edge = TopoDS.Edge(exp.Current())
+        bnd = Bnd_Box()
+        BRepBndLib.Add_s(edge, bnd)
+        mn = bnd.CornerMin()
+        mx = bnd.CornerMax()
+        if (
+            abs(mx.Z() - mn.Z()) > 11.0
+            and abs(mx.X() - mn.X()) < 1e-6
+            and abs(mx.Y() - mn.Y()) < 1e-6
+            and not any(edge.IsSame(seen) for seen in chosen)
+        ):
+            chosen.append(edge)
+            fillet.Add(radius, edge)
+        exp.Next()
+    fillet.Build()
+    if not fillet.IsDone():
+        raise RuntimeError("BRepFilletAPI_MakeFillet failed for build_corner_filleted_block")
+    return fillet.Shape()

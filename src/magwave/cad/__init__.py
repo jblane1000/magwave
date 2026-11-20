@@ -1,7 +1,13 @@
-"""CAD and mesh import, manifest, and body role assignment (FR-010, FR-011, FR-013).
+"""CAD and mesh import, manifest, and body role assignment (FR-010, FR-011, FR-012, FR-013).
 
 No heavy optional backend (``OCP`` or ``trimesh``) is imported at module import time;
 backends are loaded lazily inside :func:`import_cad` according to file format.
+
+Supported import paths for defeaturing:
+
+* ``from magwave.cad.defeature import defeature`` (canonical; ``magwave.cad.defeature`` is the
+  submodule, not shadowed by the function)
+* ``from magwave.cad import defeature_shape`` (package-level alias)
 """
 
 from __future__ import annotations
@@ -14,8 +20,8 @@ from .defeature import (
     FaceDescriptor,
     boolean_subtract,
     boolean_union,
-    defeature,
 )
+from .defeature import defeature as defeature_shape
 from .manifest import (
     DEFECT_KINDS,
     SOURCES,
@@ -109,7 +115,7 @@ __all__ = [
     "assign",
     "boolean_subtract",
     "boolean_union",
-    "defeature",
+    "defeature_shape",
     "import_cad",
     "require_all_assigned",
     "unassigned",

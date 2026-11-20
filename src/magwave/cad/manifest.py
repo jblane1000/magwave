@@ -21,6 +21,7 @@ DEFECT_KINDS: tuple[str, ...] = (
     "imported_as_shell",
     "interference",
     "defeature_failed",
+    "defeature_invalid",
 )
 
 

@@ -25,9 +25,9 @@ from magwave.cad import (
     RemovedFeature,
     boolean_subtract,
     boolean_union,
-    defeature,
 )
-from tests.fixtures.cad_builders import build_filleted_block
+from magwave.cad.defeature import defeature
+from tests.fixtures.cad_builders import build_corner_filleted_block, build_filleted_block
 
 
 def _count_solids(shape: object) -> int:
@@ -97,7 +97,9 @@ def test_boolean_empty_inputs_raise_value_error() -> None:
 
 
 def test_defeature_threshold_too_small_removes_nothing() -> None:
-    res = defeature(build_filleted_block(), max_feature_size_mm=0.5)
+    # Under characteristic-radius semantics the AC fixture's R0.15 torus fillets have
+    # size_mm == 0.15, so 0.1 mm is below the smallest feature.
+    res = defeature(build_filleted_block(), max_feature_size_mm=0.1)
     assert res.features_removed == 0
     assert res.removed_features == []
     assert res.volume_delta == pytest.approx(0.0, abs=1e-9)
@@ -175,3 +177,84 @@ def test_lazy_ocp_guard_for_defeature_module() -> None:
         [sys.executable, "-c", code], capture_output=True, text=True, env=env, check=False
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_defeature_edge_fillet_uses_radius_not_bbox() -> None:
+    """F5: long edge fillets are sized by radius (0.5 mm), not face bbox diagonal (12.02 mm)."""
+    block = build_corner_filleted_block(radius=0.5)
+    result = defeature(block, max_feature_size_mm=2.0)
+
+    assert result.features_removed >= 4
+    assert all(item.surface_type == "Cylinder" for item in result.removed_features)
+    assert all(item.size_mm == pytest.approx(0.5) for item in result.removed_features)
+    assert BRepCheck_Analyzer(result.shape).IsValid()
+    assert result.volume_delta == pytest.approx(result.volume_after - result.volume_before)
+    assert abs(result.volume_delta) > 1e-9
+
+
+def test_defeature_bore_wall_is_not_a_candidate() -> None:
+    """F5: complete-revolution bore walls (R0.30, u-span 2*pi) are excluded from defeaturing."""
+    result = defeature(build_filleted_block(), max_feature_size_mm=2.0)
+
+    assert all(item.surface_type != "Cylinder" for item in result.removed_features)
+    assert result.volume_after == pytest.approx(47864.2832, rel=1e-6)
+
+
+def test_defeature_invalid_result_is_reported_not_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F4: invalid defeature output returns original input shape with defeature_invalid defect."""
+    import magwave.cad.defeature as df
+
+    monkeypatch.setattr(df, "_shape_is_valid", lambda _ocp, _shape: False)
+    original = build_filleted_block()
+    result = defeature(original, max_feature_size_mm=2.0)
+
+    assert result.features_removed == 0
+    assert result.removed_features == []
+    assert result.volume_delta == 0.0
+    assert result.volume_after == pytest.approx(result.volume_before)
+    assert any(d.kind == "defeature_invalid" for d in result.defects)
+    assert result.shape.IsSame(original)
+
+    assert "defeature_invalid" in DEFECT_KINDS
+    defect = Defect(kind="defeature_invalid", detail="invalid solid", body_index=0)
+    assert Defect.from_dict(defect.to_dict()) == defect
+
+
+def test_defeature_fallback_removes_all_candidates_when_batch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F1: per-face fallback re-fetches face handles from evolving shape and removes >= 30/40."""
+    import magwave.cad.defeature as df
+
+    real_defeature_shapes = df._defeature_shapes
+
+    def _single_face_only(ocp, shape, faces):
+        if len(faces) > 1:
+            return None
+        return real_defeature_shapes(ocp, shape, faces)
+
+    monkeypatch.setattr(df, "_defeature_shapes", _single_face_only)
+    result = defeature(build_filleted_block(), max_feature_size_mm=2.0)
+
+    assert result.features_removed >= 30
+    assert BRepCheck_Analyzer(result.shape).IsValid()
+    assert result.volume_delta == pytest.approx(result.volume_after - result.volume_before)
+
+
+def test_defeature_module_import_is_unambiguous() -> None:
+    """F3: magwave.cad.defeature resolves to the module, while cad.defeature_shape aliases fn."""
+    import types
+
+    import magwave.cad as cad
+    import magwave.cad.defeature as df
+
+    assert isinstance(cad.defeature, types.ModuleType)  # the name resolves to the submodule
+    assert cad.defeature is sys.modules["magwave.cad.defeature"]
+    assert cad.defeature is df
+    assert callable(df.defeature)
+    assert cad.defeature_shape is df.defeature
+    # The old package-level callable is gone; `from magwave.cad import defeature` now yields the
+    # module, which fails loudly rather than silently removing the wrong thing.
+    assert not callable(cad.defeature)

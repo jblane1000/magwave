@@ -397,6 +397,15 @@ def _format_manifest_summary(manifest) -> str:
     return "\n".join(lines)
 
 
+def _is_ocp_failure(exc: BaseException) -> bool:
+    """True when *exc* originates in OpenCASCADE (Standard_Failure and its siblings)."""
+    for cls in type(exc).__mro__:
+        module = getattr(cls, "__module__", "") or ""
+        if module == "OCP" or module.startswith("OCP."):
+            return True
+    return False
+
+
 def _run_import(
     cad_path: str,
     json_path: str | None,
@@ -416,6 +425,11 @@ def _run_import(
     except (MissingExtraError, FileNotFoundError, ValueError, OSError) as exc:
         print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        if _is_ocp_failure(exc):
+            print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
+            return 1
+        raise
 
     if mapping:
         try:

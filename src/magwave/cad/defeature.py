@@ -3,6 +3,19 @@
 All ``OCP`` imports are deferred until a geometry function is called so that importing
 :mod:`magwave.cad` or :mod:`magwave.cad.defeature` never loads OCCT when ``[step]`` is
 absent or unused.
+
+Candidate feature faces are sized by characteristic local size rather than face extent:
+
+* ``GeomAbs_Cylinder`` -> ``Cylinder().Radius()``
+* ``GeomAbs_Torus`` -> ``Torus().MinorRadius()``
+* ``GeomAbs_Sphere`` -> ``Sphere().Radius()``
+* other non-planar surfaces -> bounding-box diagonal fallback
+* ``GeomAbs_Plane`` -> excluded
+
+Complete-revolution faces (cylinder ``u`` span ``>= 2*pi - _SPAN_TOL``, torus ``v`` span
+``>= 2*pi - _SPAN_TOL``, sphere ``v`` span ``>= pi - _SPAN_TOL``) are bores, bosses, or
+closed shells rather than blends and are excluded from candidate removal. Thus a threshold
+of ``N`` mm removes blends whose radius (or other local characteristic size) is below ``N`` mm.
 """
 
 from __future__ import annotations
@@ -13,6 +26,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .manifest import Defect
+
+_SPAN_TOL = 1e-6
 
 
 def _load_ocp() -> dict[str, Any]:
@@ -28,8 +43,14 @@ def _load_ocp() -> dict[str, Any]:
             BRepAlgoAPI_Fuse,
         )
         from OCP.BRepBndLib import BRepBndLib
+        from OCP.BRepCheck import BRepCheck_Analyzer
         from OCP.BRepGProp import BRepGProp
-        from OCP.GeomAbs import GeomAbs_Plane
+        from OCP.GeomAbs import (
+            GeomAbs_Cylinder,
+            GeomAbs_Plane,
+            GeomAbs_Sphere,
+            GeomAbs_Torus,
+        )
         from OCP.GProp import GProp_GProps
         from OCP.OCP.collections import List_TopoDS_Shape
         from OCP.TopAbs import TopAbs_FACE
@@ -45,8 +66,12 @@ def _load_ocp() -> dict[str, Any]:
         "BRepAlgoAPI_Defeaturing": BRepAlgoAPI_Defeaturing,
         "BRepAlgoAPI_Fuse": BRepAlgoAPI_Fuse,
         "BRepBndLib": BRepBndLib,
+        "BRepCheck_Analyzer": BRepCheck_Analyzer,
         "BRepGProp": BRepGProp,
+        "GeomAbs_Cylinder": GeomAbs_Cylinder,
         "GeomAbs_Plane": GeomAbs_Plane,
+        "GeomAbs_Sphere": GeomAbs_Sphere,
+        "GeomAbs_Torus": GeomAbs_Torus,
         "GProp_GProps": GProp_GProps,
         "List_TopoDS_Shape": List_TopoDS_Shape,
         "TopAbs_FACE": TopAbs_FACE,
@@ -67,7 +92,12 @@ class BooleanResult:
 
 @dataclass
 class FaceDescriptor:
-    """Summary of a candidate or removed CAD face."""
+    """Summary of a candidate or removed CAD face.
+
+    ``size_mm`` is the characteristic local feature size in millimetres (radius or minor
+    radius for cylinders, tori, and spheres; bounding-box diagonal fallback otherwise), not
+    the face extent.
+    """
 
     surface_type: str
     size_mm: float
@@ -98,6 +128,11 @@ def _shape_volume(ocp: dict[str, Any], shape: Any) -> float:
     return abs(float(props.Mass()))
 
 
+def _shape_is_valid(ocp: dict[str, Any], shape: Any) -> bool:
+    """Return True when OCCT ``BRepCheck_Analyzer`` reports *shape* valid."""
+    return bool(ocp["BRepCheck_Analyzer"](shape).IsValid())
+
+
 def _surface_type_name(stype: Any) -> str:
     raw = getattr(stype, "name", str(stype))
     if "." in raw:
@@ -120,16 +155,36 @@ def _candidate_faces(
     exp = ocp["TopExp_Explorer"](shape, ocp["TopAbs_FACE"])
     while exp.More():
         face = ocp["TopoDS"].Face(exp.Current())
-        stype = ocp["BRepAdaptor_Surface"](face).GetType()
+        surface = ocp["BRepAdaptor_Surface"](face)
+        stype = surface.GetType()
         if stype != ocp["GeomAbs_Plane"]:
-            diag = _face_bbox_diagonal(ocp, face)
-            if diag is not None and diag < max_feature_size_mm:
+            du = float(surface.LastUParameter() - surface.FirstUParameter())
+            dv = float(surface.LastVParameter() - surface.FirstVParameter())
+            size: float | None
+            if stype == ocp["GeomAbs_Cylinder"]:
+                if du >= 2.0 * math.pi - _SPAN_TOL:
+                    exp.Next()
+                    continue
+                size = float(surface.Cylinder().Radius())
+            elif stype == ocp["GeomAbs_Torus"]:
+                if dv >= 2.0 * math.pi - _SPAN_TOL:
+                    exp.Next()
+                    continue
+                size = float(surface.Torus().MinorRadius())
+            elif stype == ocp["GeomAbs_Sphere"]:
+                if dv >= math.pi - _SPAN_TOL:
+                    exp.Next()
+                    continue
+                size = float(surface.Sphere().Radius())
+            else:
+                size = _face_bbox_diagonal(ocp, face)
+            if size is not None and size < max_feature_size_mm:
                 candidates.append(
                     (
                         face,
                         FaceDescriptor(
                             surface_type=_surface_type_name(stype),
-                            size_mm=diag,
+                            size_mm=size,
                         ),
                     )
                 )
@@ -147,6 +202,23 @@ def _make_defeature_defect(failed: list[FaceDescriptor], threshold_mm: float) ->
         ),
         body_index=None,
     )
+
+
+def _defeature_shapes(ocp: dict[str, Any], shape: Any, faces: list[Any]) -> Any | None:
+    """Run one BRepAlgoAPI_Defeaturing pass over *faces*; return the new shape or None."""
+    seq = ocp["List_TopoDS_Shape"]()
+    for face in faces:
+        seq.Append(face)
+    algo = ocp["BRepAlgoAPI_Defeaturing"]()
+    algo.SetShape(shape)
+    algo.AddFacesToRemove(seq)
+    algo.SetRunParallel(False)
+    algo.Build()
+    if algo.IsDone():
+        out = algo.Shape()
+        if out is not None and not out.IsNull():
+            return out
+    return None
 
 
 def boolean_union(shapes: Sequence[Any]) -> BooleanResult:
@@ -201,7 +273,7 @@ def boolean_subtract(base: Any, tools: Sequence[Any]) -> BooleanResult:
 
 
 def defeature(shape: Any, *, max_feature_size_mm: float) -> DefeatureResult:
-    """Remove non-planar feature faces with bbox diagonal below ``max_feature_size_mm``."""
+    """Remove non-planar feature faces with characteristic local size below ``max_feature_size_mm``."""
     if isinstance(max_feature_size_mm, bool) or not isinstance(
         max_feature_size_mm, int | float
     ):
@@ -232,64 +304,76 @@ def defeature(shape: Any, *, max_feature_size_mm: float) -> DefeatureResult:
         )
 
     # Strategy 1: remove all candidate faces in one OCCT BRepAlgoAPI_Defeaturing pass.
-    seq = ocp["List_TopoDS_Shape"]()
-    for face, _ in candidates:
-        seq.Append(face)
-    batch = ocp["BRepAlgoAPI_Defeaturing"]()
-    batch.SetShape(shape)
-    batch.AddFacesToRemove(seq)
-    batch.SetRunParallel(False)
-    batch.Build()
-    if batch.IsDone():
-        batch_shape = batch.Shape()
-        if batch_shape is not None and not batch_shape.IsNull():
-            volume_after = _shape_volume(ocp, batch_shape)
-            removed_descriptors = [desc for _, desc in candidates]
-            return DefeatureResult(
-                shape=batch_shape,
-                threshold_mm=threshold,
-                features_removed=len(removed_descriptors),
-                removed_features=removed_descriptors,
-                volume_before=volume_before,
-                volume_after=volume_after,
-                volume_delta=volume_after - volume_before,
-                defects=[],
-            )
+    batch_shape = _defeature_shapes(ocp, shape, [face for face, _ in candidates])
+    if batch_shape is not None and _shape_is_valid(ocp, batch_shape):
+        volume_after = _shape_volume(ocp, batch_shape)
+        removed_descriptors = [desc for _, desc in candidates]
+        return DefeatureResult(
+            shape=batch_shape,
+            threshold_mm=threshold,
+            features_removed=len(removed_descriptors),
+            removed_features=removed_descriptors,
+            volume_before=volume_before,
+            volume_after=volume_after,
+            volume_delta=volume_after - volume_before,
+            defects=[],
+        )
 
-    # Strategy 2: fall back to per-face removal across bounded passes.
+    # Strategy 2: fall back to per-face removal, re-fetching handles from *current* each step.
     current = shape
     removed: list[FaceDescriptor] = []
     defects: list[Defect] = []
-    max_passes = 3
-    for _ in range(max_passes):
-        pass_candidates = _candidate_faces(ocp, current, threshold)
-        if not pass_candidates:
+    attempts_left = max(2 * len(candidates), 8)
+    while attempts_left > 0:
+        fresh = _candidate_faces(ocp, current, threshold)
+        if not fresh:
             break
         progressed = False
-        failed_in_pass: list[FaceDescriptor] = []
-        for face, desc in pass_candidates:
-            single = ocp["BRepAlgoAPI_Defeaturing"]()
-            single.SetShape(current)
-            single.AddFaceToRemove(face)
-            single.SetRunParallel(False)
-            single.Build()
-            if single.IsDone():
-                next_shape = single.Shape()
-                if next_shape is not None and not next_shape.IsNull():
-                    current = next_shape
-                    removed.append(desc)
-                    progressed = True
-                    continue
-            failed_in_pass.append(desc)
-        if failed_in_pass and not progressed:
-            defects.append(_make_defeature_defect(failed_in_pass, threshold))
+        for idx in range(len(fresh)):
+            if attempts_left <= 0:
+                break
+            fresh = _candidate_faces(ocp, current, threshold)
+            if idx >= len(fresh):
+                break
+            face, desc = fresh[idx]
+            attempts_left -= 1
+            nxt = _defeature_shapes(ocp, current, [face])
+            if nxt is not None:
+                current = nxt
+                removed.append(desc)
+                progressed = True
+                break
+        if not progressed:
             break
-    else:
-        remaining = _candidate_faces(ocp, current, threshold)
-        if remaining:
-            defects.append(_make_defeature_defect([desc for _, desc in remaining], threshold))
 
     _ensure_non_null(current, "defeature result")
+    if not _shape_is_valid(ocp, current):
+        discarded = len(removed) if removed else len(candidates)
+        return DefeatureResult(
+            shape=shape,
+            threshold_mm=threshold,
+            features_removed=0,
+            removed_features=[],
+            volume_before=volume_before,
+            volume_after=volume_before,
+            volume_delta=0.0,
+            defects=[
+                Defect(
+                    kind="defeature_invalid",
+                    detail=(
+                        f"defeatured shape failed BRepCheck_Analyzer validity check; "
+                        f"discarded {discarded} candidate feature removal(s) below "
+                        f"{threshold:.4f} mm"
+                    ),
+                    body_index=None,
+                )
+            ],
+        )
+
+    remaining = _candidate_faces(ocp, current, threshold)
+    if remaining:
+        defects.append(_make_defeature_defect([desc for _, desc in remaining], threshold))
+
     volume_after = _shape_volume(ocp, current)
     return DefeatureResult(
         shape=current,

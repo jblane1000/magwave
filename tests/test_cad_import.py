@@ -380,6 +380,8 @@ def test_remaining_defect_kinds_non_manifold_merged_and_interference(tmp_path: P
     # Confirm our entire test suite covers every defined Defect.kind
     df_defect = Defect(kind="defeature_failed", detail="sample failure", body_index=0)
     assert df_defect.kind == "defeature_failed"
+    di_defect = Defect(kind="defeature_invalid", detail="sample invalid", body_index=0)
+    assert di_defect.kind == "defeature_invalid"
     seen_kinds = {
         "open_shell",
         "non_manifold_edge",
@@ -389,6 +391,7 @@ def test_remaining_defect_kinds_non_manifold_merged_and_interference(tmp_path: P
         "imported_as_shell",
         "interference",
         "defeature_failed",
+        "defeature_invalid",
     }
     assert seen_kinds == set(DEFECT_KINDS)
 
@@ -528,3 +531,26 @@ def test_cli_import_step_defeature_below(
     assert rc_plain == 0
     plain_payload = json.loads(out_plain.read_text(encoding="utf-8"))
     assert "defeatures" not in plain_payload
+
+
+def test_cli_import_ocp_failure_is_clean_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F2: OCP exceptions during `magwave import` exit 1 with a single-line error."""
+    import magwave.cad as cad
+    from magwave.cli import _is_ocp_failure
+
+    assert not _is_ocp_failure(ValueError("not ocp"))
+
+    fake_exc = type("Standard_Failure", (Exception,), {"__module__": "OCP.OCP.Standard"})
+
+    def _boom(*_args, **_kwargs):
+        raise fake_exc("boom from OCCT")
+
+    monkeypatch.setattr(cad, "import_cad", _boom)
+    rc = main(["import", str(tmp_path / "x.step")])
+    err = capsys.readouterr().err
+
+    assert rc == 1
+    assert "magwave import: boom from OCCT" in err
+    assert "Traceback" not in err
