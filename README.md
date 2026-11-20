@@ -109,6 +109,18 @@ This walkthrough uses the shipped point-dipole example (`examples/solve-dipole.j
    | probe #0 (0.0, 0.0, 0.5) m | B | z | 1.6000000000000004e-06 | T | 1.6e-06 | 1e-09 | PASS |
    ```
 
+### Automated offscreen GUI walkthrough
+
+To verify the desktop window end-to-end without a display server (PRD FR-061), run the offscreen walkthrough script against the shipped example:
+
+```bash
+python tools/gui_walkthrough.py --case examples/solve-dipole.json --shots /tmp/gw
+```
+
+- **Screenshots written to `--shots`:** `01-loaded.png` (window immediately after loading the case), optional `02-dialog.png` / `02-dialog-<n>.png` (if clicking **Run** opens any visible dialog), and `03-after-run.png` (window after solving and closing any dialogs). Screenshots are human inspection artifacts; pass/fail checks read live Qt widget state (`probes_table` column 4), never pixels.
+- **`PASS` / `FAIL` and exit status:** prints a single `PASS:` or `FAIL:` summary line comparing the solved value read from `probes_table` against the case's expected value and tolerance. Exit status `0` means the **Run** button was enabled and every solved probe was within tolerance; non-zero means **Run** was missing/disabled, no solved value appeared, or a probe exceeded tolerance.
+- **Qt offscreen stderr noise:** `This plugin does not support propagateSizeHints()` on stderr comes from Qt's `offscreen` platform plugin and is harmless, not a failure.
+
 ## Development
 
 ```bash
