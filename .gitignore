@@ -26,3 +26,6 @@ cases/local/
 # Generated document editions (deliverables, not source)
 docs/export/
 
+# Internal working documents (briefs, handover reports, dispatch records)
+docs/briefs/
+

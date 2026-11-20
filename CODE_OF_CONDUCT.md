@@ -9,7 +9,8 @@ In short:
 - No harassment, no discriminatory language, no publishing others' private information.
 - Disagreement is expected and welcome; contempt is not.
 
-Report concerns privately to the maintainer at jblane1000@gmail.com. Reports are handled confidentially.
+Report concerns privately to the maintainer through GitHub's private reporting channel (the **Security**
+tab → **Report a vulnerability**). Reports are handled confidentially.
 Consequences range from a warning to a permanent ban, at the maintainer's discretion.
 
 The maintainer's decisions on technical direction are final; the code of conduct governs *how* we argue,

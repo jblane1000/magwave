@@ -1,37 +1,35 @@
-# Coordination — who does what, and what the gates are
+# Coordination — roles and gates
 
-MagWave is run as a small project team. This file is the standing arrangement: it says who owns which
-work, what each work package must hand over, and what has to be true before anything moves.
+MagWave is run as a small project team with one coordinator. This file states the standing arrangement:
+who owns which work, what each work package must hand over, and what has to be true before anything moves.
 
-**The rule that overrides everything else:** an agent's own summary is not evidence. The coordinator
-re-runs every acceptance command and pastes the raw output. A number quoted without a rung
+**The rule that overrides everything else:** a summary is not evidence. The coordinator re-runs every
+acceptance command and pastes the raw output. A number quoted without a rung
 (closed-form · TEAM · second code · measurement) is an opinion, not a result.
 
-## Roster
+## Roles
 
-| Member | Domain | Owns | Does not do |
-|---|---|---|---|
-| **Max** (coordinator) | architecture, specification | PRD, architecture records, integration, verification, release gate | does not silently rewrite another member's deliverable |
-| **Reese** | research | validation sources, TEAM problem data, materials/B–H provenance, landscape refresh | does not write solver or UI code |
-| **Cody** | implementation | package skeleton, benchmark harness, Tier 0 engine, Tier 1 kernel | does not merge its own work; the coordinator verifies |
-| **Manny** | CAD | import test corpus (clean + deliberately broken STEP assemblies), import-manifest review, datum/frame discipline | does not choose physics methods |
-| **Crea** | documents & design | PDF editions, README/docs polish, diagrams, figure styling | does not summarise or reorder source content |
-| **Sammy** | delivery | email to inbox/Kindle when asked, receipts | does not compose technical content |
-
-Helen (health) and Vex (trading) are not on this project.
+| Role | Owns | Does not do |
+|---|---|---|
+| **Coordinator** | architecture, specification: PRD, architecture records, integration, verification, release gate | does not silently rewrite another role's deliverable |
+| **Research** | validation sources, TEAM problem data, materials/B–H provenance, landscape refresh | does not write solver or UI code |
+| **Implementation** | package skeleton, benchmark harness, Tier 0 engine, Tier 1 kernel | does not merge its own work; the coordinator verifies |
+| **CAD** | import test corpus (clean + deliberately broken STEP assemblies), import-manifest review, datum/frame discipline | does not choose physics methods |
+| **Documents & design** | PDF editions, README/docs polish, diagrams, figure styling | does not summarise or reorder source content |
+| **Delivery** | email to inbox/Kindle when asked, receipts | does not compose technical content |
 
 ## Work packages
 
-| ID | Package | Owner | Exit criterion |
+| ID | Package | Role | Exit criterion |
 |---|---|---|---|
-| WP-01 | Validation sources dossier: exact closed-form formulas, TEAM problem definitions and published reference values, tolerance rationale | Reese | `docs/research/validation-sources.md` with a citation per formula and per reference value |
-| WP-02 | Materials and magnet data: public B–H and demagnetization curve sources, temperature coefficients, licence per source | Reese | `docs/research/materials-bh-data.md`; every dataset carries provenance and licence |
-| WP-03 | M1 skeleton + benchmark harness: case model, units, CLI, harness that fails on a 1 % perturbation | Cody | CI green; harness demonstrated by deliberately breaking one expected value |
-| WP-04 | Tier 0 engine: magnets, coils, sampling, forces, export | Cody | FR-030/031/032/050/052 satisfied against WP-01 numbers |
-| WP-05 | Desktop UI v1: open case, assign roles, run, slice/glyph/streamline, report export | Cody | a new user completes the README walkthrough unassisted |
-| WP-06 | CAD import corpus + manifest: three clean assemblies, three defective ones (open shell, interference, mixed units) | Manny | manifest reports every defect; no body dropped silently |
-| WP-07 | Document editions: A4 and Kindle/A5 PDFs from one source | Crea | both editions render from one source with identical figures |
-| WP-08 | Delivery: Kindle and inbox sends with hash-verified attachments | Sammy | recipient, message id, downloaded size and sha256 reported |
+| WP-01 | Validation sources dossier: exact closed-form formulas, TEAM problem definitions and published reference values, tolerance rationale | Research | `docs/research/validation-sources.md` with a citation per formula and per reference value |
+| WP-02 | Materials and magnet data: public B–H and demagnetization curve sources, temperature coefficients, licence per source | Research | `docs/research/materials-bh-data.md`; every dataset carries provenance and licence |
+| WP-03 | M1 skeleton + benchmark harness: case model, units, CLI, harness that fails on a 1 % perturbation | Implementation | CI green; harness demonstrated by deliberately breaking one expected value |
+| WP-04 | Tier 0 engine: magnets, coils, sampling, forces, export | Implementation | FR-030/031/032/050/052 satisfied against WP-01 numbers |
+| WP-05 | Desktop UI v1: open case, assign roles, run, slice/glyph/streamline, report export | Implementation | a new user completes the README walkthrough unassisted |
+| WP-06 | CAD import corpus + manifest: three clean assemblies, three defective ones (open shell, interference, mixed units) | CAD | manifest reports every defect; no body dropped silently |
+| WP-07 | Document editions: A4 and Kindle/A5 PDFs from one source | Documents & design | both editions render from one source with identical figures |
+| WP-08 | Delivery: Kindle and inbox sends with hash-verified attachments | Delivery | recipient, message id, downloaded size and sha256 reported |
 
 ## Gates
 
@@ -53,29 +51,11 @@ Helen (health) and Vex (trading) are not on this project.
 5. **Licence boundary is physical.** `gmsh` and Elmer are subprocesses; the CI gate enforces it.
 6. **Specs are the source of truth.** Requirement IDs (FR-###, NFR-#) are never renumbered; a withdrawn
    requirement is marked *Withdrawn* with its date.
-7. **Every implementation brief names its engine — and its tier.** Cody's implementation work is
-   written by `agy`, not by Cody's own model. A brief to Cody says so explicitly — "implement via an
-   `agy-work` brief; you write the brief, run it, and verify against the acceptance command" — because
-   an advisory rule that is not in the dispatch does not fire: on 2026-11-18 an M1 job ran 66 tool
-   calls and 184k tokens of Cody's own authorship with zero `agy` calls. Cody may still patch directly
-   for a one-line repair or to fix `agy`'s own output, and says which engine produced the code.
-8. **Tier policy (set 2026-11-18).** `agy` is free to pick the tier, but the default is fixed by job
-   class: **implementation-class work → `gemini-pro-orchestrator-g1-pro`** (Argon plans and reviews,
-   Hydrogen implements; the default for `agy-work` since this date); **small well-specified jobs →
-   `gemini-4-hydrogen-high`** (`xhigh` when gnarly); **checks and reviews → Claude**
-   (`claude-sonnet-5-5-high` quick, `claude-opus-5-5-high` deep), the scarce pool, spent on
-   verification rather than authoring; **hard design or debugging → `gemini-4-argon-high`** or
-   Orchestrator. Measured cost of the change: one M3-class feature took 8m43s and **2 Argon quota
-   points** under Orchestrator versus **47 Claude weekly points** under Opus.
-9. **Implementation is dispatched to Cody; the coordinator does not call `agy` itself.** The path is
-   Max → Cody over A2A → Cody drives `agy` → Max re-runs the acceptance command. `agy-work` invoked
-   from the coordinator is a defect, not a shortcut, because it makes the fleet's coding member
-   ornamental and removes the one hand that is supposed to author the change. The only exceptions are
-   (a) Cody's gateway is down or unreachable, reported to Jason before proceeding, and (b) a
-   one-line repair to `agy`'s own output, declared in the first line of the report. Both exceptions
-   are named at the time, never discovered later. On 2026-11-19 the M4 implementation was run
-   coordinator-side instead of through Cody: the code and its verification were sound, the hand was
-   not, and the rule above is the correction.
+7. **Implementation is delegated, then verified.** Changes are authored by the implementation role, not
+   by the coordinator; the coordinator's job is the brief, the acceptance run and the merge. A brief
+   states the acceptance command it will be judged by, and the implementer reports which engine produced
+   the code. A coordinator-authored change is a declared exception, never a habit — it removes the hand
+   accountable for the commit.
 
 ## Cadence
 
