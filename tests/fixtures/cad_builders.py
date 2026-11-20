@@ -262,7 +262,9 @@ def build_filleted_block() -> object:
 
 def build_filleted_step(out_path: Path) -> Path:
     """Write the 40-fillet block to a single-part STEP file."""
-    return _write_step_parts(out_path, [("filleted_block", build_filleted_block())], as_assembly=False)
+    return _write_step_parts(
+        out_path, [("filleted_block", build_filleted_block())], as_assembly=False
+    )
 
 
 def build_corner_filleted_block(radius: float = 0.5) -> object:

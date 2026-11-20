@@ -170,9 +170,7 @@ class RemovedFeature:
             raise ValueError("removed_feature.surface_type: expected a non-empty string")
         self.size_mm = _check_float(self.size_mm, "removed_feature.size_mm")
         if self.size_mm < 0.0:
-            raise ValueError(
-                f"removed_feature.size_mm: must be non-negative, got {self.size_mm}"
-            )
+            raise ValueError(f"removed_feature.size_mm: must be non-negative, got {self.size_mm}")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -221,9 +219,7 @@ class DefeatureRecord:
             raise ValueError(
                 f"defeature.features_removed: must be non-negative, got {self.features_removed}"
             )
-        self.volume_before_mm3 = _check_float(
-            self.volume_before_mm3, "defeature.volume_before_mm3"
-        )
+        self.volume_before_mm3 = _check_float(self.volume_before_mm3, "defeature.volume_before_mm3")
         self.volume_after_mm3 = _check_float(self.volume_after_mm3, "defeature.volume_after_mm3")
         self.volume_delta_mm3 = _check_float(self.volume_delta_mm3, "defeature.volume_delta_mm3")
         self.removed_features = list(self.removed_features)

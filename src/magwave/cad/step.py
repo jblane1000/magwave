@@ -442,9 +442,7 @@ def import_step(
     )
 
 
-def import_iges(
-    path: str | Path, *, defeature_below: float | None = None
-) -> Manifest:
+def import_iges(path: str | Path, *, defeature_below: float | None = None) -> Manifest:
     """Best-effort IGES import with ShapeFix + sewing (FR-010, FR-012, ADR-0006)."""
     file_path = Path(path)
     if not file_path.is_file():

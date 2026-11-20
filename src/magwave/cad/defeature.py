@@ -274,9 +274,7 @@ def boolean_subtract(base: Any, tools: Sequence[Any]) -> BooleanResult:
 
 def defeature(shape: Any, *, max_feature_size_mm: float) -> DefeatureResult:
     """Remove non-planar feature faces with characteristic local size below ``max_feature_size_mm``."""
-    if isinstance(max_feature_size_mm, bool) or not isinstance(
-        max_feature_size_mm, int | float
-    ):
+    if isinstance(max_feature_size_mm, bool) or not isinstance(max_feature_size_mm, int | float):
         raise ValueError(
             f"max_feature_size_mm: expected float, got {type(max_feature_size_mm).__name__}"
         )
