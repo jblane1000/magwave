@@ -24,7 +24,7 @@ not a pass). The `--report-accuracy` flag on `bench --engine` exposes the real m
 errors of those 9 cases against the `1e-2` certified gate without touching a single research-owned
 tolerance.
 
-All figures below were measured on 2026-11-19 in `/home/jblane1000/projects/magwave` using
+All figures below were measured on 2026-11-19 in a clean checkout of this repository using
 `env -u PYTHONPATH .venv/bin/python` (Python 3.12.3, NumPy 2.5.5, SciPy 1.18.1).
 
 ## Decision

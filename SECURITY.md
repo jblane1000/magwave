@@ -6,8 +6,9 @@ parser risks apply.
 
 ## Reporting
 
-Email jblane1000@gmail.com with steps to reproduce. Please do not open a public issue for a security
-problem. Acknowledgement within 7 days; a fix or a stated position within 30.
+Use GitHub's private vulnerability reporting: **Security** tab → **Report a vulnerability** on this
+repository. Please do not open a public issue for a security problem. Acknowledgement within 7 days; a
+fix or a stated position within 30.
 
 ## In scope
 
