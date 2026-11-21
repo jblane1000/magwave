@@ -233,7 +233,7 @@ truncation is well below the `5.79e-3` staircase discretisation floor at `R/64`.
 
 ### A.4 FR-041 gate and Stage B deferrals
 
-- **FR-041 Tier 0 gate:** `MagpylibEngine` supports `uniform_field` by analytic superposition
+- **FR-041 Tier 0 gate:** `MagpylibEngine` supports `uniform_field` by analytic superposition — enforced-by: tests/test_fr041_gate.py::test_tier0_refuses_a_permeable_manifest_body
   (`MU0 * h0` added to `B_z`, without applying `mu0_ratio`) and refuses any case containing a
   `permeable` component or a `permeable_solid` manifest body with `E_UNSUPPORTED_PERMEABLE`,
   pointing to `Tier 1 stage 2 (M5.2)` (`fem2d`) and producing zero numeric samples.
