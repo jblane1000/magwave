@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .force import ForceResult
 
 from .. import __version__
 from ..cases import Case, Coil, Dipole, Magnet, Permeable, UniformField
@@ -135,6 +139,22 @@ def _dedup_sorted(values: list[float], low: float, high: float) -> list[float]:
     return out
 
 
+class _FieldState:
+    """Internal solved field state retained for Tier 1 force/energy post-processing."""
+
+    mesh: Mesh
+    a_phi: np.ndarray
+    load: np.ndarray
+    nu_final: np.ndarray
+    assignments: list[tuple[Permeable, np.ndarray, Material, str]]
+    demag_assignments: list[tuple[Magnet, int, np.ndarray, DemagCurve, float, bool]]
+    element_size_used: float
+
+
+# Decorate _FieldState cleanly below
+_FieldState = dataclass(frozen=True)(_FieldState)
+
+
 class Fem2dEngine:
     """Linear axisymmetric ``A_phi`` finite-element magnetostatics solver (Tier 1, M5.2a).
 
@@ -214,7 +234,7 @@ class Fem2dEngine:
         self._magnet_curves: dict[str, DemagCurve] = (
             dict(magnet_curves) if magnet_curves is not None else {}
         )
-        self._version = f"{__version__}+m5.3"
+        self._version = f"{__version__}+m5.4"
 
     @property
     def certified_accuracy(self) -> float:
@@ -244,7 +264,7 @@ class Fem2dEngine:
             magnet_kinds=frozenset({"cylinder"}),
             coil_kinds=frozenset({"solenoid"}),
             quantities=frozenset({"B"}),
-            force_methods=(),
+            force_methods=("maxwell_stress_tensor", "coenergy_virtual_work"),
             engine_version=self._version,
             materials=frozenset(
                 {"air", "linear_permeable", "nonlinear_permeable", "permanent_magnet_demag_curve"}
@@ -460,12 +480,23 @@ class Fem2dEngine:
                 )
 
         for index, probe in enumerate(case.probes):
-            if probe.quantity not in self.capabilities().quantities:
+            if probe.quantity == "F":
+                problems.append(
+                    Problem(
+                        E_UNSUPPORTED_QUANTITY,
+                        f"{case.name}: probe #{index} asks for force 'F'; point probes cannot "
+                        "name a force target or integration contour — call "
+                        "Fem2dEngine.force(case, method=...) instead; nothing was solved.",
+                        "error",
+                    )
+                )
+            elif probe.quantity not in self.capabilities().quantities:
                 problems.append(
                     Problem(
                         E_UNSUPPORTED_QUANTITY,
                         f"{case.name}: probe #{index} asks for {probe.quantity!r}; fem2d "
-                        "stage 1 samples B only (forces arrive later)",
+                        "solve() samples B only — call Fem2dEngine.force(case, method=...) for "
+                        "forces; nothing was solved.",
                         "error",
                     )
                 )
@@ -760,8 +791,8 @@ class Fem2dEngine:
                 demag_assignments.append((component, comp_idx, mask, curve, sign, is_custom))
         return demag_assignments
 
-    def solve_with_report(self, case: Case) -> tuple[Result, SolveReport]:
-        """Validate and solve ``case``, returning ``(Result, SolveReport)``."""
+    def _solve_core(self, case: Case) -> tuple[Result, SolveReport, _FieldState]:
+        """Validate and solve ``case``, returning ``(Result, SolveReport, _FieldState)``."""
         warnings = raise_on_errors(ENGINE_ID, self.validate(case))
         mesh, load, probes_rz = self._build_mesh_and_load(case)
         assignments, region_ids = self._permeable_assignments(mesh, case)
@@ -796,7 +827,7 @@ class Fem2dEngine:
                 for _, _, mask, curve, sign, _ in demag_assignments
             ]
             try:
-                a_phi, report, history, _ = solve_axisymmetric_nonlinear(
+                a_phi, report, history, nu_final = solve_axisymmetric_nonlinear(
                     mesh,
                     load,
                     element_curves,
@@ -894,7 +925,7 @@ class Fem2dEngine:
                 for _, _, mat, _ in assignments
             ]
             try:
-                a_phi, report, history, _ = solve_axisymmetric_nonlinear(
+                a_phi, report, history, nu_final = solve_axisymmetric_nonlinear(
                     mesh,
                     load,
                     element_curves,
@@ -954,6 +985,7 @@ class Fem2dEngine:
             if not assignments:
                 nu: float | np.ndarray = 1.0 / MU0
                 material_notes: list[str] = []
+                nu_final = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
             else:
                 nu_arr = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
                 material_notes = []
@@ -961,6 +993,7 @@ class Fem2dEngine:
                     nu_arr[mask] = mat.nu()
                     material_notes.append(prov_line)
                 nu = nu_arr
+                nu_final = nu_arr
 
             a_phi, report = solve_axisymmetric(
                 mesh, load, nu=nu, constrained=constrained, values=values
@@ -1032,12 +1065,53 @@ class Fem2dEngine:
             problems=tuple(warnings),
             convergence=convergence,
         )
+        state = _FieldState(
+            mesh=mesh,
+            a_phi=a_phi,
+            load=load,
+            nu_final=nu_final,
+            assignments=assignments,
+            demag_assignments=demag_assignments,
+            element_size_used=float(mesh.h_requested),
+        )
+        return result, report, state
+
+    def solve_with_report(self, case: Case) -> tuple[Result, SolveReport]:
+        """Validate and solve ``case``, returning ``(Result, SolveReport)``."""
+        result, report, _ = self._solve_core(case)
         return result, report
 
     def solve(self, case: Case) -> Result:
         """Validate and solve ``case``; raise :class:`EngineError` if unsolvable."""
         result, _ = self.solve_with_report(case)
         return result
+
+    def force(
+        self,
+        case: Case,
+        *,
+        method: str = "maxwell",
+        target: str | None = None,
+        contour: tuple[float, float, float] | None = None,
+        delta: float | None = None,
+    ) -> ForceResult:
+        """Compute axial force on ``target`` using Maxwell stress tensor or virtual work."""
+        from .force import coenergy_force, maxwell_force
+
+        if method in ("maxwell", "maxwell_stress_tensor"):
+            return maxwell_force(case, self, target=target, contour=contour)
+        if method in ("coenergy", "coenergy_virtual_work"):
+            return coenergy_force(case, self, target=target, delta=delta)
+        raise ValueError(
+            f"unsupported force method {method!r}; expected 'maxwell' or 'coenergy' "
+            f"(or {self.capabilities().force_methods!r})"
+        )
+
+    def torque(self, case: Case, *, target: str | None = None) -> ForceResult:
+        """Refuse torque honestly: axisymmetric A_phi has zero azimuthal stress by construction."""
+        from .force import torque as _torque
+
+        return _torque(case, self, target=target)
 
     def __repr__(self) -> str:
         return (

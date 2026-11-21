@@ -126,6 +126,29 @@ def _hermite_cubic_eval(
     return y, dy
 
 
+def _hermite_cubic_integral(
+    x: np.ndarray,
+    x0: float,
+    x1: float,
+    y0: float,
+    y1: float,
+    m0: float,
+    m1: float,
+) -> np.ndarray:
+    """Evaluate exact integral ``int_{x0}^{x} y(xi) dxi`` for cubic Hermite on ``[x0, x1]``."""
+    length = x1 - x0
+    t = (x - x0) / length
+    t2 = t * t
+    t3 = t2 * t
+    t4 = t2 * t2
+    return length * (
+        (0.5 * t4 - t3 + t) * y0
+        + (0.25 * t4 - (2.0 / 3.0) * t3 + 0.5 * t2) * (length * m0)
+        + (-0.5 * t4 + t3) * y1
+        + (0.25 * t4 - (1.0 / 3.0) * t3) * (length * m1)
+    )
+
+
 def _hermite_min_deriv(
     x0: float,
     x1: float,
@@ -176,6 +199,7 @@ class BhCurve:
 
         self._pchip = PchipInterpolator(self._b_tab, self._h_tab, extrapolate=False)
         self._dpchip = self._pchip.derivative()
+        self._pchip_anti = self._pchip.antiderivative()
 
         first_idx = 1 if self._b_tab[0] == 0.0 else 0
         self._b1 = float(self._b_tab[first_idx])
@@ -226,6 +250,42 @@ class BhCurve:
                         self._b_join = b_j
                         break
                     length *= 2.0
+
+        # Precompute exact cumulative integrals int_0^b H(B') dB' at piecewise-smooth knots.
+        self._w_low_blend = 0.5 * self._s_lin * (self._b_low_blend**2)
+        if self._b_low_blend < self._b1:
+            bridge_low_int = float(
+                _hermite_cubic_integral(
+                    np.array([self._b1], dtype=np.float64),
+                    self._b_low_blend,
+                    self._b1,
+                    self._b_low_blend * self._s_lin,
+                    self._h1,
+                    self._s_lin,
+                    self._s_b1,
+                )[0]
+            )
+            self._w_b1 = self._w_low_blend + bridge_low_int
+        else:
+            self._w_b1 = self._w_low_blend
+        self._pchip_anti_b1 = float(self._pchip_anti(self._b1))
+        self._w_b_last = self._w_b1 + (float(self._pchip_anti(self._b_last)) - self._pchip_anti_b1)
+        if self._saturation_B is not None and self._b_join > self._b_last:
+            h_join = (self._b_join - self._saturation_B) / MU0
+            bridge_high_int = float(
+                _hermite_cubic_integral(
+                    np.array([self._b_join], dtype=np.float64),
+                    self._b_last,
+                    self._b_join,
+                    self._h_last,
+                    h_join,
+                    self._s_last,
+                    self._s_sat,
+                )[0]
+            )
+            self._w_b_join = self._w_b_last + bridge_high_int
+        else:
+            self._w_b_join = self._w_b_last
 
     @property
     def name(self) -> str:
@@ -361,6 +421,71 @@ class BhCurve:
         b_flat, shape = self._validate_query(b)
         _, dh_out = self._eval_h_and_dh(b_flat)
         return (1.0 / dh_out).reshape(shape)
+
+    def magnetic_energy_density(self, b: Any) -> np.ndarray:
+        """Return exact stored magnetic energy density ``int_0^|B| H(B') dB'`` in J/m^3."""
+        b_flat, shape = self._validate_query(b)
+        high = b_flat > self._b_last
+        if np.any(high) and self._saturation_B is None:
+            raise ValueError(
+                f"material {self._name!r}: field |B| = {float(np.max(b_flat[high])):.6g} T "
+                f"exceeds last B-H table point {self._b_last:g} T and no saturation_B is set"
+            )
+
+        w_out = np.empty_like(b_flat)
+        low_lin = b_flat <= self._b_low_blend
+        low_bridge = (b_flat > self._b_low_blend) & (b_flat < self._b1)
+        mid = (b_flat >= self._b1) & (b_flat <= self._b_last)
+        high_bridge = high & (b_flat < self._b_join)
+        high_sat = high & (b_flat >= self._b_join)
+
+        if np.any(low_lin):
+            w_out[low_lin] = 0.5 * self._s_lin * (b_flat[low_lin] ** 2)
+
+        if np.any(low_bridge):
+            w_out[low_bridge] = self._w_low_blend + _hermite_cubic_integral(
+                b_flat[low_bridge],
+                self._b_low_blend,
+                self._b1,
+                self._b_low_blend * self._s_lin,
+                self._h1,
+                self._s_lin,
+                self._s_b1,
+            )
+
+        if np.any(mid):
+            w_out[mid] = self._w_b1 + (
+                np.asarray(self._pchip_anti(b_flat[mid]), dtype=np.float64) - self._pchip_anti_b1
+            )
+
+        if np.any(high_bridge):
+            assert self._saturation_B is not None
+            h_join = (self._b_join - self._saturation_B) / MU0
+            w_out[high_bridge] = self._w_b_last + _hermite_cubic_integral(
+                b_flat[high_bridge],
+                self._b_last,
+                self._b_join,
+                self._h_last,
+                h_join,
+                self._s_last,
+                self._s_sat,
+            )
+
+        if np.any(high_sat):
+            assert self._saturation_B is not None
+            b_s = b_flat[high_sat]
+            w_out[high_sat] = self._w_b_join + 0.5 * self._s_sat * (
+                (b_s - self._saturation_B) ** 2 - (self._b_join - self._saturation_B) ** 2
+            )
+
+        return w_out.reshape(shape)
+
+    def coenergy_density(self, b: Any) -> np.ndarray:
+        """Return magnetic coenergy density ``|B|*H(|B|) - w(|B|)`` in J/m^3."""
+        b_flat, shape = self._validate_query(b)
+        h_out, _ = self._eval_h_and_dh(b_flat)
+        w_out = self.magnetic_energy_density(b_flat)
+        return (b_flat * h_out - w_out).reshape(shape)
 
 
 @functools.lru_cache(maxsize=64)

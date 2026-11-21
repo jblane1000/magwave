@@ -1,0 +1,81 @@
+Header
+  Mesh DB "." "mesh"
+End
+
+Simulation
+  Coordinate System = Axi Symmetric
+  Simulation Type = Steady State
+  Steady State Max Iterations = 1
+End
+
+Constants
+  Permeability of Vacuum = 1.2566370614359173e-6
+End
+
+Body 1
+  Target Bodies(1) = 1
+  Name = "Air"
+  Equation = 1
+  Material = 1
+End
+
+Body 2
+  Target Bodies(1) = 2
+  Name = "Magnet"
+  Equation = 1
+  Material = 2
+End
+
+Body 3
+  Target Bodies(1) = 3
+  Name = "SteelPlate"
+  Equation = 1
+  Material = 3
+End
+
+Equation 1
+  Active Solvers(2) = 1 2
+End
+
+Material 1
+  Relative Permeability = 1.0
+End
+
+Material 2
+  Relative Permeability = __MU_REC__
+  Magnetization 2 = __MAGNETIZATION_Z__
+End
+
+Material 3
+  H-B Curve = Variable "dummy"
+    Real Cubic Monotone
+      Include "team20_hb.dat"
+    End
+End
+
+Boundary Condition 1
+  Target Boundaries(4) = 1 2 3 4
+  Az = Real 0.0
+End
+
+Solver 1
+  Equation = "Mag"
+  Procedure = "MagnetoDynamics2D" "MagnetoDynamics2D"
+  Variable = -dofs 1 "Az"
+  Exec Solver = Always
+  Steady State Convergence Tolerance = 1.0e-8
+  Linear System Solver = Direct
+  Linear System Direct Method = UMFPACK
+  Nonlinear System Max Iterations = 50
+  Nonlinear System Convergence Tolerance = 1.0e-8
+  Nonlinear System Newton After Iterations = 3
+  Nonlinear System Relaxation Factor = 1.0
+End
+
+Solver 2
+  Exec Solver = After All
+  Equation = "ResultOutput"
+  Procedure = "ResultOutputSolve" "ResultOutputSolver"
+  Output File Name = "result"
+  Vtu Format = Logical True
+End
