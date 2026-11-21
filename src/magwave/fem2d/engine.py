@@ -173,7 +173,7 @@ class Fem2dEngine:
         self._material_model = material_model
         self._tol = float(tol)
         self._max_iterations = int(max_iterations)
-        self._version = f"{__version__}+m5.2a"
+        self._version = f"{__version__}+m5.2b"
 
     @property
     def certified_accuracy(self) -> float:
