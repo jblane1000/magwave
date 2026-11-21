@@ -16,7 +16,7 @@ import pytest
 
 from magwave.analytic import cylinder_Bz_axis, thick_solenoid_Bz
 from magwave.cases import Case, Coil, ExpectedValue, Magnet, Permeable, Probe
-from magwave.engines import EngineError, Fem2dEngine, MagpylibEngine
+from magwave.engines import EngineError, Fem2dEngine, MagpylibEngine, Result
 from magwave.fem2d import (
     E_NOT_CONVERGED,
     assemble_nonlinear_system,
@@ -142,7 +142,32 @@ def test_uniform_br_path_unchanged() -> None:
     assert res1.convergence is not None
     assert res1.convergence.iterations == 1
     assert res1.convergence.magnet_operating_points == ()
-    assert res1.values() == res2.values()
+
+    # Compare the NUMERIC payload, never the serialised JSON text: engine_version is
+    # provenance, so a version bump must not be able to fail this physics test. Probe
+    # values are compared with exact float equality and every convergence number
+    # (counts, residual, residual history) with the same strictness as before.
+    def _numeric_payload(result: Result) -> dict[str, object]:
+        payload = build_report_payload(case, result, case_file="tests/test_m5_3_pm_demag.py")
+        convergence = payload["convergence"]
+        return {
+            "probes": [
+                {"point": row["point"], "computed": row["computed"]} for row in payload["probes"]
+            ],
+            "convergence": {
+                key: convergence[key]
+                for key in (
+                    "elements",
+                    "final_relative_residual",
+                    "interface_nodes",
+                    "iterations",
+                    "nodes",
+                    "residual_history",
+                )
+            },
+        }
+
+    assert _numeric_payload(res1) == _numeric_payload(res2)
 
     m_unif = BR_N42 / MU0
     for z, computed in zip(z_pts, res1.values(), strict=True):

@@ -26,7 +26,7 @@
     {
       "check": "nonlinear_pm_demag_fem",
       "quantity": "Bz",
-      "source": "Tier 1 Fem2dEngine (N42-20C demag curve, default mesh h = 0.5 mm)",
+      "source": "REGRESSION SNAPSHOT: Tier 1 Fem2dEngine output at default mesh h = 0.5 mm (N42-20C demag curve); not a physical reference",
       "tolerance": 0.03,
       "unit": "T",
       "value": 0.9250100940070316
@@ -34,7 +34,7 @@
     {
       "check": "nonlinear_pm_demag_fem",
       "quantity": "Bz",
-      "source": "Tier 1 Fem2dEngine (N42-20C demag curve, default mesh h = 0.5 mm)",
+      "source": "REGRESSION SNAPSHOT: Tier 1 Fem2dEngine output at default mesh h = 0.5 mm (N42-20C demag curve); not a physical reference",
       "tolerance": 0.03,
       "unit": "T",
       "value": 0.04871809723852616

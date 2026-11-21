@@ -214,7 +214,7 @@ class Fem2dEngine:
         self._magnet_curves: dict[str, DemagCurve] = (
             dict(magnet_curves) if magnet_curves is not None else {}
         )
-        self._version = f"{__version__}+m5.2b"
+        self._version = f"{__version__}+m5.3"
 
     @property
     def certified_accuracy(self) -> float:

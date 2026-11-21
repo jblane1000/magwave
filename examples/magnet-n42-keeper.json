@@ -56,7 +56,7 @@
     {
       "check": "nonlinear_pm_demag_fem",
       "quantity": "Bz",
-      "source": "Tier 1 Fem2dEngine (N42-20C demag curve + nonlinear steel-team20 keepers)",
+      "source": "REGRESSION SNAPSHOT: Tier 1 Fem2dEngine output at default mesh h = 0.5 mm (N42-20C demag curve + nonlinear steel-team20 keepers); not a physical reference",
       "tolerance": 0.03,
       "unit": "T",
       "value": 1.0655571548165717
