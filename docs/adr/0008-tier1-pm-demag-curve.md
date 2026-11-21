@@ -85,7 +85,7 @@ k_hcj = 1 + alpha_hcj_per_c * (T - t_ref_c).
 
 ### Gate 3 — Analytic cylinder (`mu_rec = 1`) and uniform-`Br` reduction
 
-**Validation of record:** the Tier-1 permanent-magnet validation is `tests/test_m5_3_pm_demag.py::test_g3_analytic_cylinder_and_exact_uniform_br_reduction` — a synthetic linear `1/MU0` curve against the analytic cylinder closed form within 1 %, reducing to the uniform-`Br` path within 1e-9; the shipped `examples/magnet-n42-*.json` values are regression snapshots of this engine at the stated mesh, not physical references.
+**Validation of record:** the Tier-1 permanent-magnet validation is `tests/test_m5_3_pm_demag.py::test_g3_analytic_cylinder_and_exact_uniform_br_reduction` — a synthetic linear `1/MU0` curve against the analytic cylinder closed form within 1 %, reducing to the uniform-`Br` path within 1e-9; the shipped `examples/magnet-n42-*.json` values are regression snapshots of this engine at the stated mesh, not physical references. — enforced-by: tests/test_m5_3_pm_demag.py::test_g3_analytic_cylinder_and_exact_uniform_br_reduction
 
 Cylinder `R = 10 mm`, `L = 20 mm`, `Br = 1.315 T`, synthetic linear `1/MU0` curve, `far_field_factor = 25`:
 

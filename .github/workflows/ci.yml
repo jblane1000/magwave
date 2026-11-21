@@ -29,6 +29,8 @@ jobs:
         run: ruff check .
       - name: Format
         run: ruff format --check .
+      - name: ADR enforcement map (no dangling links)
+        run: python tools/adr_check_map.py
       - name: Tests
         run: pytest -q
       - name: Benchmarks (FR-070)
