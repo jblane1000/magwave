@@ -8,6 +8,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **M5.4c — Cell-aligned virtual-work shift (`+m5.4c`)**:
+  enforced exact cell-aligned virtual displacements (`delta = k * h`, integer `k >= 1`) in
+  `magwave.fem2d.force.coenergy_force`, refusing sub-cell/non-aligned steps with
+  `E_FORCE_DELTA_NOT_ALIGNED` before clearance checks or solving and removing the silent
+  `0.25 * max_shift` clamp; added `DeltaStep`, `DeltaStudyResult`, and `coenergy_delta_study`
+  (default `(h, 2h, 3h)`) with separate `+delta`/`-delta` mesh-count and gap-cell split
+  invariance verification; confirmed asymptotic `O(delta^2)` convergence on the Gate 3 magnet +
+  steel plate case at `h = 2.5e-4 m` (`p_per_pair = +2.15022`, `p_fit = +2.15022`,
+  `asymptotic = YES`, `F_extrap = 101.37869 +/- 0.25583 N`, `0.8844%` vs Maxwell `102.28330 N`,
+  `0.345%` vs Elmer `101.72932 N`) alongside Gate 3 Basis (i) `delta = h = 5.0e-4 m`
+  (`102.81233 N`, `0.5146%` vs Maxwell), both PASS on the unchanged `2%` gate; re-based
+  `tools/force_report.py` §4 coenergy column to cell-aligned `delta = h` (explicit refusal at
+  `h = 1.0e-3 m`); documented findings in `docs/adr/0009-tier1-force-torque.md`.
 - **M5.4 — Tier 1 forces (Maxwell stress + coenergy), torque refusal, Tier 0 permeable force gate**:
   `magwave.fem2d.force` (`maxwell_force`, `coenergy_force`, `magnetic_coenergy`, `torque`
   refusing with `E_TORQUE_NOT_MEANINGFUL`) wired into `Fem2dEngine.force` (`+m5.4`), exact

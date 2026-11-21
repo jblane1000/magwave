@@ -8,12 +8,16 @@ from .field import element_field, sample_field
 from .force import (
     E_FORCE_CONTOUR_DOES_NOT_ENCLOSE,
     E_FORCE_CONTOUR_IN_MATERIAL,
+    E_FORCE_DELTA_NOT_ALIGNED,
     E_FORCE_TARGET_AMBIGUOUS,
     E_FORCE_TARGET_UNKNOWN,
     E_FORCE_UNSUPPORTED_CASE,
     E_TORQUE_NOT_MEANINGFUL,
+    DeltaStep,
+    DeltaStudyResult,
     ForceError,
     ForceResult,
+    coenergy_delta_study,
     coenergy_force,
     magnetic_coenergy,
     maxwell_force,
@@ -29,9 +33,12 @@ from .nonlinear import (
 from .solve import SolveReport, dirichlet_nodes, solve_axisymmetric
 
 __all__ = [
+    "DeltaStep",
+    "DeltaStudyResult",
     "ENGINE_ID",
     "E_FORCE_CONTOUR_DOES_NOT_ENCLOSE",
     "E_FORCE_CONTOUR_IN_MATERIAL",
+    "E_FORCE_DELTA_NOT_ALIGNED",
     "E_FORCE_TARGET_AMBIGUOUS",
     "E_FORCE_TARGET_UNKNOWN",
     "E_FORCE_UNSUPPORTED_CASE",
@@ -46,6 +53,7 @@ __all__ = [
     "RUNG",
     "SolveReport",
     "assemble_nonlinear_system",
+    "coenergy_delta_study",
     "coenergy_force",
     "count_interface_nodes",
     "dirichlet_nodes",

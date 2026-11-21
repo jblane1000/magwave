@@ -24,6 +24,14 @@ Two independent methods are implemented on top of :class:`~magwave.fem2d.engine.
      magnetic energy :math:`U = \\int w(\\mathbf{B})\\,dV` with :math:`F_z = -dU/dz`, since
      :math:`\\frac{1}{2}\\int \\mathbf{B}\\cdot\\mathbf{H}\\,dV \\equiv 0` when :math:`\\mathbf{J}=0`.
 
+   Only **cell-aligned** virtual displacements (:math:`\\delta = k\\,h` for positive integer
+   :math:`k`) are accepted. Shifting by an exact integer multiple of the axial refinement cell
+   size :math:`h` keeps every shifted boundary on existing uniform grid lines, reproducing the
+   identical mesh so the central difference evaluates one discrete energy function; sub-cell
+   steps (:math:`\\delta \\neq k\\,h`) remesh and insert extra :math:`z`-lines, turning the
+   finite-difference error into a step function of :math:`\\delta`. Sub-cell or non-aligned
+   steps are refused explicitly with :data:`E_FORCE_DELTA_NOT_ALIGNED` without solving.
+
 3. **Torque** (:func:`torque`) refuses explicitly with :data:`E_TORQUE_NOT_MEANINGFUL`: the
    axisymmetric ``A_phi`` formulation has no azimuthal asymmetry, so axial torque is
    identically zero by construction rather than a computed physical zero.
@@ -32,7 +40,7 @@ Two independent methods are implemented on top of :class:`~magwave.fem2d.engine.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -54,6 +62,7 @@ E_FORCE_CONTOUR_IN_MATERIAL = "E_FORCE_CONTOUR_IN_MATERIAL"
 E_FORCE_CONTOUR_DOES_NOT_ENCLOSE = "E_FORCE_CONTOUR_DOES_NOT_ENCLOSE"
 E_TORQUE_NOT_MEANINGFUL = "E_TORQUE_NOT_MEANINGFUL"
 E_FORCE_UNSUPPORTED_CASE = "E_FORCE_UNSUPPORTED_CASE"
+E_FORCE_DELTA_NOT_ALIGNED = "E_FORCE_DELTA_NOT_ALIGNED"
 
 METHOD_MAXWELL = "maxwell_stress_tensor"
 METHOD_COENERGY = "coenergy_virtual_work"
@@ -95,6 +104,50 @@ class ForceResult:
     coenergy_j: float | None = None
     delta_m: float | None = None
     notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DeltaStep:
+    """One accepted cell-aligned virtual-work solve in a delta convergence ladder."""
+
+    label: str
+    delta_m: float
+    delta_over_h: float
+    force_n: float
+    change_vs_prev_pct: float | None
+    mesh_nodes_plus: int
+    mesh_elements_plus: int
+    mesh_nodes_minus: int
+    mesh_elements_minus: int
+    gap_cells_plus: int | None
+    gap_cells_minus: int | None
+
+
+@dataclass(frozen=True)
+class DeltaStudyResult:
+    """Result of an aligned finite-difference virtual-work step convergence study."""
+
+    target: str
+    h_m: float
+    base_mesh_nodes: int
+    base_mesh_elements: int
+    axial_gap_m: float | None
+    expected_gap_cell_sum: int | None
+    steps: tuple[DeltaStep, ...]
+    refused: tuple[tuple[float, str], ...]
+    p_per_pair: tuple[float | None, ...]
+    p_fit: float | None
+    monotonic: bool
+    asymptotic: bool
+    f_extrapolated_n: float | None
+    step_uncertainty_n: float
+    step_uncertainty_pct: float
+    peak_to_peak_n: float
+    peak_to_peak_pct: float
+    mesh_counts_invariant: bool
+    gap_cell_sum_invariant: bool | None
+    alignment_invariant_holds: bool
+    notes: tuple[str, ...]
 
 
 def _component_label(component: Component, index: int) -> str:
@@ -870,12 +923,16 @@ def magnetic_coenergy(
     return (w_co if has_coils else u_total), report, result.convergence
 
 
-def _max_safe_axial_shift(case: Case, target_idx: int, target_comp: Magnet | Coil) -> float:
-    """Return the largest axial shift ``|dz|`` before ``target_comp`` touches another body."""
+def _nearest_axial_gap_face(
+    case: Case,
+    target_idx: int,
+    target_comp: Magnet | Coil,
+) -> tuple[float, str, float] | None:
+    """Return ``(gap_m, side, other_face_z)`` to the nearest axially blocking body, or ``None``."""
     t_ext = _component_rz_extents(target_comp)
     assert t_ext is not None
     t_r0, t_r1, t_z0, t_z1, _ = t_ext
-    max_shift = math.inf
+    best: tuple[float, str, float] | None = None
 
     for idx, comp in enumerate(case.components):
         if idx == target_idx:
@@ -884,6 +941,7 @@ def _max_safe_axial_shift(case: Case, target_idx: int, target_comp: Magnet | Coi
         if o_ext is None:
             continue
         o_r0, o_r1, o_z0, o_z1, tag = o_ext
+        candidate: tuple[float, str, float] | None = None
         if tag == "sphere":
             assert isinstance(comp, Permeable)
             rc = math.hypot(comp.center[0], comp.center[1])
@@ -893,19 +951,106 @@ def _max_safe_axial_shift(case: Case, target_idx: int, target_comp: Magnet | Coi
             if dr < rad - _AXIS_TOL:
                 z_clearance = math.sqrt(max(0.0, rad * rad - dr * dr))
                 if t_z0 >= zc + z_clearance - _AXIS_TOL:
-                    max_shift = min(max_shift, max(0.0, t_z0 - (zc + z_clearance)))
+                    candidate = (
+                        max(0.0, t_z0 - (zc + z_clearance)),
+                        "below",
+                        zc + z_clearance,
+                    )
                 elif t_z1 <= zc - z_clearance + _AXIS_TOL:
-                    max_shift = min(max_shift, max(0.0, (zc - z_clearance) - t_z1))
+                    candidate = (
+                        max(0.0, (zc - z_clearance) - t_z1),
+                        "above",
+                        zc - z_clearance,
+                    )
                 else:
-                    max_shift = 0.0
+                    candidate = (0.0, "overlap", zc)
         elif min(t_r1, o_r1) - max(t_r0, o_r0) >= -_AXIS_TOL:
             if o_z0 >= t_z1 - _AXIS_TOL:
-                max_shift = min(max_shift, max(0.0, o_z0 - t_z1))
+                candidate = (max(0.0, o_z0 - t_z1), "above", o_z0)
             elif t_z0 >= o_z1 - _AXIS_TOL:
-                max_shift = min(max_shift, max(0.0, t_z0 - o_z1))
+                candidate = (max(0.0, t_z0 - o_z1), "below", o_z1)
             else:
-                max_shift = 0.0
-    return max_shift
+                candidate = (0.0, "overlap", o_z0)
+
+        if candidate is not None and (best is None or candidate[0] < best[0]):
+            best = candidate
+    return best
+
+
+def _max_safe_axial_shift(case: Case, target_idx: int, target_comp: Magnet | Coil) -> float:
+    """Return the largest axial shift ``|dz|`` before ``target_comp`` touches another body."""
+    nearest = _nearest_axial_gap_face(case, target_idx, target_comp)
+    return math.inf if nearest is None else nearest[0]
+
+
+def _count_gap_cells(z_axis: np.ndarray, z_lo: float, z_hi: float) -> int:
+    """Return the count of ``z_axis`` cells spanning the open axial gap ``(z_lo, z_hi)``."""
+    return int(np.sum((z_axis > z_lo + _AXIS_TOL) & (z_axis < z_hi - _AXIS_TOL))) + 1
+
+
+def _aligned_cell_multiple(delta: float, h: float) -> int | None:
+    """Return integer ``k >= 1`` iff ``delta`` equals ``k * h`` within ``1e-9`` relative tol."""
+    if not (math.isfinite(delta) and math.isfinite(h)) or delta <= 0.0 or h <= 0.0:
+        return None
+    k_float = delta / h
+    k_int = round(k_float)
+    if k_int >= 1 and abs(k_float - k_int) <= 1e-9 * max(1.0, abs(k_float)):
+        return int(k_int)
+    return None
+
+
+def _resolve_aligned_delta(
+    case: Case,
+    target_label: str,
+    h_eff: float,
+    max_shift: float,
+    delta: float | None,
+) -> tuple[float, int]:
+    """Validate and resolve a cell-aligned virtual displacement ``(delta_m, k_mult)``."""
+    if delta is None:
+        if math.isfinite(max_shift) and h_eff >= max_shift - _AXIS_TOL:
+            raise ForceError(
+                E_FORCE_UNSUPPORTED_CASE,
+                f"{case.name}: target {target_label!r} has axial clearance {max_shift:g} m to an "
+                f"adjacent body, which cannot accommodate even k=1 cell-aligned shift "
+                f"h={h_eff:g} m ({h_eff:.3e} m; no integer k*h fits); nothing was solved.",
+            )
+        return float(h_eff), 1
+
+    if isinstance(delta, bool) or not isinstance(delta, int | float):
+        raise ForceError(
+            E_FORCE_UNSUPPORTED_CASE,
+            f"{case.name}: delta must be a positive finite number, got {delta!r}; nothing was solved.",
+        )
+    delta_used = float(delta)
+    if not math.isfinite(delta_used) or delta_used <= 0.0:
+        raise ForceError(
+            E_FORCE_UNSUPPORTED_CASE,
+            f"{case.name}: delta must be positive and finite, got {delta!r}; nothing was solved.",
+        )
+
+    # Alignment check runs BEFORE axial-clearance check so non-aligned steps always emit
+    # E_FORCE_DELTA_NOT_ALIGNED cleanly without solving.
+    k_mult = _aligned_cell_multiple(delta_used, h_eff)
+    if k_mult is None:
+        raise ForceError(
+            E_FORCE_DELTA_NOT_ALIGNED,
+            f"{case.name}: virtual displacement delta={delta_used:g} m ({delta_used:.3e} m) is "
+            f"not aligned with h={h_eff:g} m ({h_eff:.3e} m, ratio delta/h={delta_used / h_eff:.6g}): "
+            "virtual-work delta must be an exact integer multiple k*h of the local axial cell "
+            "size h (a cell-aligned shift reproduces the identical mesh, so the central "
+            "difference sees one discrete energy function; a sub-cell shift remeshes, which "
+            "makes the finite-difference error a step function of delta); nothing was solved.",
+        )
+
+    if math.isfinite(max_shift) and delta_used >= max_shift - _AXIS_TOL:
+        raise ForceError(
+            E_FORCE_UNSUPPORTED_CASE,
+            f"{case.name}: virtual displacement delta={delta_used:g} m ({k_mult}*h with "
+            f"h={h_eff:g} m) meets or exceeds axial clearance {max_shift:g} m to adjacent body; "
+            "nothing was solved.",
+        )
+    return delta_used, k_mult
 
 
 def _shift_target(case: Case, target_idx: int, dz: float) -> Case:
@@ -919,6 +1064,33 @@ def _shift_target(case: Case, target_idx: int, dz: float) -> Case:
     return replace(case, components=new_components)
 
 
+def _eval_coenergy_pair(
+    solve_case: Case,
+    force_engine: Fem2dEngine,
+    target_idx: int,
+    delta_used: float,
+) -> tuple[float, float, float, bool, _FieldState, _FieldState]:
+    """Solve ``z +- delta_used`` and return ``(f_z, pot_plus, pot_minus, has_coils, state_p, state_m)``."""
+    case_plus = _shift_target(solve_case, target_idx, +delta_used)
+    case_minus = _shift_target(solve_case, target_idx, -delta_used)
+    try:
+        _, _, state_plus = force_engine._solve_core(case_plus)
+        _, _, state_minus = force_engine._solve_core(case_minus)
+    except EngineError as exc:
+        raise ForceError(E_FORCE_UNSUPPORTED_CASE, str(exc)) from exc
+
+    u_p, w_p, has_coils = _total_magnetic_energy_and_coenergy(case_plus, force_engine, state_plus)
+    u_m, w_m, _ = _total_magnetic_energy_and_coenergy(case_minus, force_engine, state_minus)
+
+    if has_coils:
+        pot_plus, pot_minus = w_p, w_m
+        f_z = +(pot_plus - pot_minus) / (2.0 * delta_used)
+    else:
+        pot_plus, pot_minus = u_p, u_m
+        f_z = -(pot_plus - pot_minus) / (2.0 * delta_used)
+    return float(f_z), float(pot_plus), float(pot_minus), has_coils, state_plus, state_minus
+
+
 def coenergy_force(
     case: Case,
     engine: Fem2dEngine,
@@ -927,7 +1099,7 @@ def coenergy_force(
     delta: float | None = None,
     direction: str = "z",
 ) -> ForceResult:
-    """Compute axial force on ``target`` by central-difference virtual work.
+    """Compute axial force on ``target`` by cell-aligned central-difference virtual work.
 
     * With fixed-current ``Coil`` sources: evaluates coenergy
       :math:`W' = \\int \\mathbf{J}\\cdot\\mathbf{A}\\,dV - U` at ``z +- delta`` and returns
@@ -935,6 +1107,9 @@ def coenergy_force(
     * Without ``Coil`` sources (permanent magnets and permeable steel only): evaluates total
       magnetic energy :math:`U = \\int w(\\mathbf{B})\\,dV` at ``z +- delta`` and returns
       :math:`F_z = -(U(+\\delta) - U(-\\delta)) / (2\\delta)`.
+
+    ``delta`` must be an exact integer multiple ``k * h`` of the axial cell size ``h``;
+    non-aligned steps raise :data:`E_FORCE_DELTA_NOT_ALIGNED` without solving.
     """
     if direction != "z":
         raise ForceError(
@@ -947,63 +1122,26 @@ def coenergy_force(
     solve_case = _prepare_solve_case(case, engine)
     force_engine, h_eff = _force_engine_for_case(solve_case, engine, target_comp)
     max_shift = _max_safe_axial_shift(solve_case, target_idx, target_comp)
+    delta_used, k_mult = _resolve_aligned_delta(solve_case, target_label, h_eff, max_shift, delta)
 
-    notes: list[str] = []
-    if delta is None:
-        delta_used = h_eff
-        if math.isfinite(max_shift) and delta_used >= 0.9 * max_shift:
-            if max_shift <= _AXIS_TOL:
-                raise ForceError(
-                    E_FORCE_UNSUPPORTED_CASE,
-                    f"{case.name}: target {target_label!r} has zero axial clearance to an "
-                    "adjacent body; virtual axial displacement is impossible.",
-                )
-            delta_used = 0.25 * max_shift
-            notes.append(
-                f"default delta={h_eff:g} m clamped to 0.25 * axial_gap = {delta_used:g} m "
-                f"(adjacent body gap={max_shift:g} m)"
-            )
-    else:
-        if isinstance(delta, bool) or not isinstance(delta, int | float):
-            raise ForceError(
-                E_FORCE_UNSUPPORTED_CASE,
-                f"{case.name}: delta must be a positive finite number, got {delta!r}.",
-            )
-        delta_used = float(delta)
-        if not math.isfinite(delta_used) or delta_used <= 0.0:
-            raise ForceError(
-                E_FORCE_UNSUPPORTED_CASE,
-                f"{case.name}: delta must be positive and finite, got {delta!r}.",
-            )
-        if math.isfinite(max_shift) and delta_used >= max_shift - _AXIS_TOL:
-            raise ForceError(
-                E_FORCE_UNSUPPORTED_CASE,
-                f"{case.name}: virtual displacement delta={delta_used:g} m exceeds axial "
-                f"clearance {max_shift:g} m to adjacent body.",
-            )
-
-    case_plus = _shift_target(solve_case, target_idx, +delta_used)
-    case_minus = _shift_target(solve_case, target_idx, -delta_used)
+    notes: list[str] = [
+        f"delta={delta_used:.3e} m = {k_mult}*h (cell-aligned; no remeshing)",
+    ]
 
     try:
         res_0, rep_0, _ = force_engine._solve_core(solve_case)
-        _, _, state_plus = force_engine._solve_core(case_plus)
-        _, _, state_minus = force_engine._solve_core(case_minus)
     except EngineError as exc:
         raise ForceError(E_FORCE_UNSUPPORTED_CASE, str(exc)) from exc
 
-    u_p, w_p, has_coils = _total_magnetic_energy_and_coenergy(case_plus, force_engine, state_plus)
-    u_m, w_m, _ = _total_magnetic_energy_and_coenergy(case_minus, force_engine, state_minus)
+    f_z, pot_plus, pot_minus, has_coils, _, _ = _eval_coenergy_pair(
+        solve_case, force_engine, target_idx, delta_used
+    )
 
     if has_coils:
-        pot_plus, pot_minus = w_p, w_m
-        f_z = +(pot_plus - pot_minus) / (2.0 * delta_used)
         pot_label = "coenergy W' = int(J.A - w(B)) dV"
         sign_desc = "F_z = +(W'(+delta) - W'(-delta)) / (2*delta) at fixed currents"
         notes.append(f"W'(+delta)={pot_plus:.10e} J, W'(-delta)={pot_minus:.10e} J")
     else:
-        pot_plus, pot_minus = u_p, u_m
-        f_z = -(pot_plus - pot_minus) / (2.0 * delta_used)
         pot_label = "total magnetic energy U = int w(B) dV (J = 0)"
         sign_desc = (
             "F_z = -(U(+delta) - U(-delta)) / (2*delta) for fixed magnet polarisation/recoil"
@@ -1013,7 +1151,7 @@ def coenergy_force(
     pot_mid = 0.5 * (pot_plus + pot_minus)
     method_detail = (
         f"Central-difference virtual work over {pot_label}; {sign_desc}; "
-        f"delta={delta_used:g} m (h={h_eff:g} m)"
+        f"delta={delta_used:g} m = {k_mult}*h (h={h_eff:g} m)"
     )
     return ForceResult(
         target=target_label,
@@ -1029,6 +1167,474 @@ def coenergy_force(
         coenergy_j=pot_mid,
         delta_m=delta_used,
         notes=tuple(notes),
+    )
+
+
+def _format_delta_label(delta_m: float, h_m: float) -> str:
+    k_mult = _aligned_cell_multiple(delta_m, h_m)
+    if k_mult == 1:
+        return "h"
+    if k_mult is not None:
+        return f"{k_mult}h"
+    ratio = delta_m / h_m
+    if 0.0 < ratio < 1.0:
+        inv = round(1.0 / ratio)
+        if 2 <= inv <= 1024 and math.isclose(ratio, 1.0 / inv, rel_tol=1e-9, abs_tol=1e-12):
+            return f"h/{inv}"
+    return f"delta/h={ratio:.4g}"
+
+
+def _observed_order_for_triple(
+    d0: float,
+    d1: float,
+    d2: float,
+    diff_fine: float,
+    diff_coarse: float,
+) -> float | None:
+    """Return observed order ``p`` for a triple ``d0 < d1 < d2`` given ``D0=F1-F0``, ``D1=F2-F1``."""
+    if diff_fine == 0.0 or diff_coarse == 0.0:
+        return None
+    ratio_d = diff_coarse / diff_fine
+    if not math.isfinite(ratio_d) or ratio_d <= 0.0:
+        return None
+    r0 = d1 / d0
+    r1 = d2 / d1
+    if math.isclose(r0, r1, rel_tol=1e-9, abs_tol=1e-12):
+        return float(math.log(ratio_d) / math.log(r0))
+
+    def _g(p_val: float) -> float:
+        if abs(p_val) < 1e-12:
+            return math.log(r1) / math.log(r0) - ratio_d
+        return (r0**p_val) * ((r1**p_val) - 1.0) / ((r0**p_val) - 1.0) - ratio_d
+
+    lo, hi = -20.0, 20.0
+    g_lo, g_hi = _g(lo), _g(hi)
+    if not (math.isfinite(g_lo) and math.isfinite(g_hi)) or g_lo * g_hi > 0.0:
+        return None
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        g_mid = _g(mid)
+        if g_mid == 0.0:
+            return float(mid)
+        if g_lo * g_mid <= 0.0:
+            hi = mid
+        else:
+            lo = mid
+            g_lo = g_mid
+    return float(0.5 * (lo + hi))
+
+
+def _fit_observed_order(
+    steps: tuple[DeltaStep, ...],
+    diffs: list[float],
+    run: list[int],
+) -> float | None:
+    """Fit power-law order ``p`` across a same-sign difference run ``run``.
+
+    Fits ``log|F(d_{i+1}) - F(d_i)| = alpha + log|(d_{i+1}^p - d_i^p) / p|`` so both
+    geometric ladders (where it reduces identically to OLS slope vs ``log delta``) and
+    arithmetic cell-aligned ladders ``(h, 2h, 3h, ...)`` recover exact ``p`` for ``F0 + C*d^p``.
+    """
+    if len(run) < 2:
+        return None
+
+    d_lo = np.array([steps[i].delta_m for i in run], dtype=np.float64)
+    d_hi = np.array([steps[i + 1].delta_m for i in run], dtype=np.float64)
+    y_fit = np.log(np.array([abs(diffs[i]) for i in run], dtype=np.float64))
+    if not np.all(np.isfinite(y_fit)) or np.ptp(d_lo) <= 0.0:
+        return None
+
+    ratios = d_hi / d_lo
+    if np.allclose(ratios, ratios[0], rtol=1e-9, atol=1e-12):
+        slope = float(np.polyfit(np.log(d_lo), y_fit, 1)[0])
+        return slope if math.isfinite(slope) else None
+
+    if len(run) == 2 and run[1] == run[0] + 1:
+        idx = run[0]
+        return _observed_order_for_triple(
+            steps[idx].delta_m,
+            steps[idx + 1].delta_m,
+            steps[idx + 2].delta_m,
+            diffs[idx],
+            diffs[idx + 1],
+        )
+
+    log_d_lo = np.log(d_lo)
+    log_d_hi = np.log(d_hi)
+    log_r = np.log(ratios)
+
+    def _sse(p_val: float) -> float:
+        if abs(p_val) < 1e-7:
+            f_p = (
+                np.log(log_r)
+                + 0.5 * p_val * (log_d_lo + log_d_hi)
+                + (p_val * p_val) * (log_r * log_r) / 24.0
+            )
+        else:
+            x_term = p_val * log_r
+            f_p = p_val * log_d_lo + np.log(np.abs(np.expm1(x_term)) / abs(p_val))
+        resid = y_fit - f_p
+        resid = resid - np.mean(resid)
+        return float(np.dot(resid, resid))
+
+    p_grid = np.linspace(-20.0, 20.0, 401)
+    losses = np.array([_sse(float(p_val)) for p_val in p_grid], dtype=np.float64)
+    best_idx = int(np.argmin(losses))
+    a = float(p_grid[max(0, best_idx - 1)])
+    b = float(p_grid[min(len(p_grid) - 1, best_idx + 1)])
+    inv_phi = (math.sqrt(5.0) - 1.0) / 2.0
+    c = b - inv_phi * (b - a)
+    d = a + inv_phi * (b - a)
+    fc, fd = _sse(c), _sse(d)
+    for _ in range(60):
+        if fc < fd:
+            b, d, fd = d, c, fc
+            c = b - inv_phi * (b - a)
+            fc = _sse(c)
+        else:
+            a, c, fc = c, d, fd
+            d = a + inv_phi * (b - a)
+            fd = _sse(d)
+    p_best = 0.5 * (a + b)
+    return float(p_best) if math.isfinite(p_best) else None
+
+
+def _analyze_delta_ladder(
+    target: str,
+    h_m: float,
+    steps: tuple[DeltaStep, ...],
+    refused: tuple[tuple[float, str], ...],
+    *,
+    base_mesh_counts: tuple[int, int],
+    axial_gap_m: float | None = None,
+    extra_notes: tuple[str, ...] = (),
+) -> DeltaStudyResult:
+    """Compute observed order, asymptotic flag, extrapolation, uncertainty, and alignment checks."""
+    n = len(steps)
+    forces = [s.force_n for s in steps]
+    peak_to_peak_n = float(max(forces) - min(forces)) if forces else 0.0
+    diffs = [steps[i + 1].force_n - steps[i].force_n for i in range(n - 1)]
+
+    if n <= 1:
+        monotonic = True
+    else:
+        monotonic = (
+            all(d > 0.0 for d in diffs)
+            or all(d < 0.0 for d in diffs)
+            or all(d == 0.0 for d in diffs)
+        )
+
+    p_per_pair = tuple(
+        _observed_order_for_triple(
+            steps[i].delta_m,
+            steps[i + 1].delta_m,
+            steps[i + 2].delta_m,
+            diffs[i],
+            diffs[i + 1],
+        )
+        for i in range(max(0, n - 2))
+    )
+
+    best_run: list[int] = []
+    curr_run: list[int] = []
+    curr_sign = 0
+    for idx, diff in enumerate(diffs):
+        if diff == 0.0:
+            if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+                best_run = curr_run
+            curr_run = []
+            curr_sign = 0
+            continue
+        sign = 1 if diff > 0.0 else -1
+        if sign == curr_sign:
+            curr_run.append(idx)
+        else:
+            if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+                best_run = curr_run
+            curr_run = [idx]
+            curr_sign = sign
+    if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+        best_run = curr_run
+
+    p_fit = _fit_observed_order(steps, diffs, best_run)
+
+    ratios_gt_one = n >= 3 and all(
+        diffs[i] != 0.0 and (diffs[i + 1] / diffs[i]) > 1.0 for i in range(n - 2)
+    )
+    asymptotic = bool(
+        n >= 3 and monotonic and ratios_gt_one and p_fit is not None and 1.5 <= p_fit <= 2.5
+    )
+
+    notes: list[str] = list(extra_notes)
+    f_ext: float | None
+    if n < 3:
+        f_ext = None
+        notes.append("fewer than 3 valid delta steps; extrapolation unavailable")
+    elif all(d == 0.0 for d in diffs):
+        f_ext = float(steps[0].force_n)
+        notes.append("force is invariant across all tested delta steps")
+    else:
+        p_used = (
+            p_fit
+            if (p_fit is not None and math.isfinite(p_fit) and p_fit > 0.0)
+            else next(
+                (
+                    p_val
+                    for p_val in p_per_pair
+                    if p_val is not None and math.isfinite(p_val) and p_val > 0.0
+                ),
+                None,
+            )
+        )
+        if p_used is None:
+            f_ext = None
+            notes.append(
+                "no positive observed convergence order exists across tested delta steps; "
+                "extrapolation unavailable"
+            )
+        else:
+            r0 = steps[1].delta_m / steps[0].delta_m
+            f_ext = float(
+                steps[0].force_n + (steps[0].force_n - steps[1].force_n) / (r0**p_used - 1.0)
+            )
+
+    triple_exts: list[tuple[int, float]] = []
+    for idx, p_val in enumerate(p_per_pair):
+        if p_val is not None and math.isfinite(p_val) and p_val > 0.0:
+            r_triple = steps[idx + 1].delta_m / steps[idx].delta_m
+            ext_val = float(
+                steps[idx].force_n
+                + (steps[idx].force_n - steps[idx + 1].force_n) / (r_triple**p_val - 1.0)
+            )
+            triple_exts.append((idx, ext_val))
+
+    if f_ext is not None:
+        correction = abs(f_ext - steps[0].force_n)
+        candidates = [f_ext, *(val for _, val in triple_exts)]
+        spread = float(max(candidates) - min(candidates)) if len(candidates) >= 2 else 0.0
+        step_uncertainty_n = float(max(correction, spread))
+    else:
+        step_uncertainty_n = float(peak_to_peak_n)
+
+    ref_scale = (
+        abs(f_ext)
+        if (f_ext is not None and f_ext != 0.0)
+        else (max(abs(f) for f in forces) if forces else 0.0)
+    )
+    step_uncertainty_pct = float(100.0 * step_uncertainty_n / ref_scale) if ref_scale > 0.0 else 0.0
+    peak_to_peak_pct = float(100.0 * peak_to_peak_n / ref_scale) if ref_scale > 0.0 else 0.0
+
+    if n >= 3 and not asymptotic:
+        notes.append(
+            "the delta ladder is not in its asymptotic range (nominal central-difference order 2), "
+            "so the extrapolation is a best estimate with a correspondingly wider band, not a "
+            "demonstrated limit"
+        )
+    if triple_exts:
+        triple_desc = ", ".join(
+            f"({steps[idx].label}, {steps[idx + 1].label}, {steps[idx + 2].label}): {val:.5f} N"
+            for idx, val in triple_exts
+        )
+        notes.append(f"triple extrapolations with positive order: {triple_desc}")
+
+    mesh_counts_invariant = bool(steps) and all(
+        (s.mesh_nodes_plus, s.mesh_elements_plus) == base_mesh_counts
+        and (s.mesh_nodes_minus, s.mesh_elements_minus) == base_mesh_counts
+        for s in steps
+    )
+
+    expected_gap_cell_sum: int | None = None
+    gap_cell_sum_invariant: bool | None = None
+    if axial_gap_m is not None and math.isfinite(axial_gap_m):
+        g_over_h = axial_gap_m / h_m
+        g_int = round(g_over_h)
+        if abs(g_over_h - g_int) <= 1e-9 * max(1.0, abs(g_over_h)):
+            expected_gap_cell_sum = int(2 * g_int)
+            gap_cell_sum_invariant = bool(steps) and all(
+                s.gap_cells_plus is not None
+                and s.gap_cells_minus is not None
+                and (s.gap_cells_plus + s.gap_cells_minus) == expected_gap_cell_sum
+                for s in steps
+            )
+        else:
+            gap_cell_sum_invariant = False
+
+    alignment_invariant_holds = (
+        bool(steps) and mesh_counts_invariant and (gap_cell_sum_invariant is not False)
+    )
+
+    if steps:
+        gap_clause = (
+            f"gap_cells_plus + gap_cells_minus == {expected_gap_cell_sum} (= 2*gap/h)"
+            if expected_gap_cell_sum is not None
+            else (
+                "no adjacent axial body (gap cell sum n/a)"
+                if axial_gap_m is None
+                else f"axial gap {axial_gap_m:g} m is not an integer multiple of h={h_m:g} m"
+            )
+        )
+        status = "HOLDS" if alignment_invariant_holds else "FAILED"
+        notes.append(
+            f"cell-alignment invariant {status} at h={h_m:.2e} m: "
+            f"base={base_mesh_counts[0]}n/{base_mesh_counts[1]}e, "
+            f"mesh_counts_invariant={mesh_counts_invariant}, {gap_clause}"
+        )
+
+    if refused:
+        notes.append(f"{len(refused)} delta step(s) refused")
+
+    return DeltaStudyResult(
+        target=target,
+        h_m=float(h_m),
+        base_mesh_nodes=int(base_mesh_counts[0]),
+        base_mesh_elements=int(base_mesh_counts[1]),
+        axial_gap_m=axial_gap_m,
+        expected_gap_cell_sum=expected_gap_cell_sum,
+        steps=steps,
+        refused=refused,
+        p_per_pair=p_per_pair,
+        p_fit=p_fit,
+        monotonic=monotonic,
+        asymptotic=asymptotic,
+        f_extrapolated_n=f_ext,
+        step_uncertainty_n=step_uncertainty_n,
+        step_uncertainty_pct=step_uncertainty_pct,
+        peak_to_peak_n=peak_to_peak_n,
+        peak_to_peak_pct=peak_to_peak_pct,
+        mesh_counts_invariant=mesh_counts_invariant,
+        gap_cell_sum_invariant=gap_cell_sum_invariant,
+        alignment_invariant_holds=alignment_invariant_holds,
+        notes=tuple(notes),
+    )
+
+
+def coenergy_delta_study(
+    case: Case,
+    engine: Fem2dEngine,
+    *,
+    target: str | None = None,
+    deltas: Iterable[float] | None = None,
+    direction: str = "z",
+) -> DeltaStudyResult:
+    """Run a cell-aligned finite-difference virtual-work ladder ``(h, 2h, 3h)`` by default."""
+    if direction != "z":
+        raise ForceError(
+            E_FORCE_UNSUPPORTED_CASE,
+            f"{case.name}: direction={direction!r} is not axisymmetric; only axial 'z' virtual "
+            "displacement is meaningful in Tier 1 axisymmetric FEM.",
+        )
+
+    target_idx, target_comp, target_label = _resolve_target(case, target)
+    solve_case = _prepare_solve_case(case, engine)
+    force_engine, h_eff = _force_engine_for_case(solve_case, engine, target_comp)
+    base_mesh, _, _ = force_engine._build_mesh_and_load(solve_case)
+    base_counts = (int(base_mesh.nodes.shape[0]), int(base_mesh.elements.shape[0]))
+    gap_info = _nearest_axial_gap_face(solve_case, target_idx, target_comp)
+    max_shift = math.inf if gap_info is None else gap_info[0]
+    axial_gap_m = None if gap_info is None else float(gap_info[0])
+
+    t_ext = _component_rz_extents(target_comp)
+    assert t_ext is not None
+    _, _, t_z0, t_z1, _ = t_ext
+
+    if deltas is None:
+        delta_list = [h_eff, 2.0 * h_eff, 3.0 * h_eff]
+    else:
+        raw_deltas: list[float] = []
+        for item in deltas:
+            if isinstance(item, bool) or not isinstance(item, int | float):
+                raise ForceError(
+                    E_FORCE_UNSUPPORTED_CASE,
+                    f"{case.name}: deltas entries must be positive finite numbers, got {item!r}.",
+                )
+            val = float(item)
+            if not math.isfinite(val) or val <= 0.0:
+                raise ForceError(
+                    E_FORCE_UNSUPPORTED_CASE,
+                    f"{case.name}: deltas entries must be positive and finite, got {item!r}.",
+                )
+            raw_deltas.append(val)
+        if not raw_deltas:
+            raise ForceError(
+                E_FORCE_UNSUPPORTED_CASE,
+                f"{case.name}: deltas must contain at least one positive value.",
+            )
+        raw_deltas.sort()
+        delta_list = []
+        for val in raw_deltas:
+            if not delta_list or abs(val - delta_list[-1]) > 1e-15 * max(1.0, abs(val)):
+                delta_list.append(val)
+
+    steps: list[DeltaStep] = []
+    refused: list[tuple[float, str]] = []
+    extra_notes: list[str] = []
+
+    for delta_m in delta_list:
+        try:
+            delta_used, _ = _resolve_aligned_delta(
+                solve_case, target_label, h_eff, max_shift, delta_m
+            )
+            f_z, _, _, _, state_plus, state_minus = _eval_coenergy_pair(
+                solve_case, force_engine, target_idx, delta_used
+            )
+        except ForceError as exc:
+            refused.append((float(delta_m), str(exc)))
+            continue
+
+        n_plus = int(state_plus.mesh.nodes.shape[0])
+        e_plus = int(state_plus.mesh.elements.shape[0])
+        n_minus = int(state_minus.mesh.nodes.shape[0])
+        e_minus = int(state_minus.mesh.elements.shape[0])
+
+        gap_cells_plus: int | None = None
+        gap_cells_minus: int | None = None
+        if gap_info is not None:
+            _, side, other_face_z = gap_info
+            if side == "above":
+                gap_cells_plus = _count_gap_cells(
+                    state_plus.mesh.z_axis, t_z1 + delta_used, other_face_z
+                )
+                gap_cells_minus = _count_gap_cells(
+                    state_minus.mesh.z_axis, t_z1 - delta_used, other_face_z
+                )
+            elif side == "below":
+                gap_cells_plus = _count_gap_cells(
+                    state_plus.mesh.z_axis, other_face_z, t_z0 + delta_used
+                )
+                gap_cells_minus = _count_gap_cells(
+                    state_minus.mesh.z_axis, other_face_z, t_z0 - delta_used
+                )
+
+        if not steps or steps[-1].force_n == 0.0:
+            change_pct: float | None = None
+        else:
+            prev_f = steps[-1].force_n
+            change_pct = float(100.0 * (f_z - prev_f) / abs(prev_f))
+
+        steps.append(
+            DeltaStep(
+                label=_format_delta_label(delta_used, h_eff),
+                delta_m=delta_used,
+                delta_over_h=float(delta_used / h_eff),
+                force_n=f_z,
+                change_vs_prev_pct=change_pct,
+                mesh_nodes_plus=n_plus,
+                mesh_elements_plus=e_plus,
+                mesh_nodes_minus=n_minus,
+                mesh_elements_minus=e_minus,
+                gap_cells_plus=gap_cells_plus,
+                gap_cells_minus=gap_cells_minus,
+            )
+        )
+
+    return _analyze_delta_ladder(
+        target_label,
+        h_eff,
+        tuple(steps),
+        tuple(refused),
+        base_mesh_counts=base_counts,
+        axial_gap_m=axial_gap_m,
+        extra_notes=tuple(extra_notes),
     )
 
 

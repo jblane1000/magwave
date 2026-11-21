@@ -34,16 +34,21 @@ from magwave.engines import EngineError, Fem2dEngine, MagpylibEngine
 from magwave.fem2d import (
     E_FORCE_CONTOUR_DOES_NOT_ENCLOSE,
     E_FORCE_CONTOUR_IN_MATERIAL,
+    E_FORCE_DELTA_NOT_ALIGNED,
     E_FORCE_TARGET_AMBIGUOUS,
     E_FORCE_TARGET_UNKNOWN,
     E_FORCE_UNSUPPORTED_CASE,
     E_TORQUE_NOT_MEANINGFUL,
+    DeltaStep,
+    DeltaStudyResult,
     ForceError,
+    coenergy_delta_study,
     coenergy_force,
     magnetic_coenergy,
     maxwell_force,
     torque,
 )
+from magwave.fem2d.force import _analyze_delta_ladder
 from magwave.materials import load_library
 from magwave.units import MU0
 
@@ -57,6 +62,22 @@ def _steel_plate_engine(h: float = 5.0e-4) -> Fem2dEngine:
         material_model="nonlinear",
         magnet_curves={LINEAR_RECOIL_GRADE: linear_curve},
     )
+
+
+@pytest.fixture(scope="module")
+def _gate3_steel_results_h5e4():
+    steel_case = build_magnet_plate_case(0.0)
+    eng = _steel_plate_engine(5.0e-4)
+    res_m = maxwell_force(steel_case, eng, target="magnet", contour=GATE3_CONTOUR)
+    res_c = coenergy_force(steel_case, eng, target="magnet")
+    return res_m, res_c
+
+
+@pytest.fixture(scope="module")
+def _gate3_aligned_study_h2_5e4() -> DeltaStudyResult:
+    steel_case = build_magnet_plate_case(0.0)
+    eng = _steel_plate_engine(2.5e-4)
+    return coenergy_delta_study(steel_case, eng, target="magnet")
 
 
 def test_bh_curve_magnetic_energy_density_matches_derivative() -> None:
@@ -417,22 +438,222 @@ def test_force_refuses_tighter_tolerance_without_weakening(
     assert boundary_case.tolerance == 1e-2
 
 
-def test_gate3_coenergy_finite_difference_step_sensitivity() -> None:
-    """Gate 3 coenergy step sensitivity: the finite-difference step must not dominate the 2% method-agreement gate."""
+def test_coenergy_refuses_non_aligned_delta_and_insufficient_clearance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sub-cell/non-aligned delta raises E_FORCE_DELTA_NOT_ALIGNED before solving or clearance."""
     steel_case = build_magnet_plate_case(0.0)
     h = 5.0e-4
     eng = _steel_plate_engine(h)
 
-    res_m = maxwell_force(steel_case, eng, target="magnet", contour=GATE3_CONTOUR)
-    res_c_h = coenergy_force(steel_case, eng, target="magnet", delta=h)
-    res_c_h2 = coenergy_force(steel_case, eng, target="magnet", delta=0.5 * h)
+    def _forbid_solve(self: Fem2dEngine, case: Case) -> object:
+        raise AssertionError("solver must not run when delta is refused")
 
-    f_m = res_m.force_n[2]
-    f_h = res_c_h.force_n[2]
-    f_h2 = res_c_h2.force_n[2]
-    assert f_h > 0.0 and f_h2 > 0.0
+    monkeypatch.setattr(Fem2dEngine, "_solve_core", _forbid_solve)
 
-    step_diff = abs(f_h - f_h2) / max(abs(f_h), abs(f_h2))
-    assert step_diff <= 0.02
-    assert abs(f_h - f_m) / max(abs(f_h), abs(f_m)) <= 0.02
-    assert abs(f_h2 - f_m) / max(abs(f_h2), abs(f_m)) <= 0.02
+    # Non-aligned deltas (including 2.5*h which also exceeds the 1 mm clearance) must raise
+    # E_FORCE_DELTA_NOT_ALIGNED before the axial-clearance check runs.
+    for bad_delta in (0.5 * h, 1.5 * h, 2.5 * h):
+        with pytest.raises(ForceError) as excinfo:
+            coenergy_force(steel_case, eng, target="magnet", delta=bad_delta)
+        assert excinfo.value.code == E_FORCE_DELTA_NOT_ALIGNED
+        msg = excinfo.value.message
+        assert steel_case.name in msg
+        assert f"{h:g}" in msg or f"{h:.3e}" in msg
+        assert "integer multiple" in msg.lower()
+        assert msg.endswith("nothing was solved.")
+
+    # When h equals the 1 mm gap, no aligned k*h fits (default and explicit h refuse cleanly).
+    eng_coarse = _steel_plate_engine(1.0e-3)
+    for delta_arg in (None, 1.0e-3):
+        with pytest.raises(ForceError) as clr_exc:
+            coenergy_force(steel_case, eng_coarse, target="magnet", delta=delta_arg)
+        assert clr_exc.value.code == E_FORCE_UNSUPPORTED_CASE
+        clr_msg = clr_exc.value.message
+        assert "1.00e-03" in clr_msg or "0.001" in clr_msg
+        assert clr_msg.endswith("nothing was solved.")
+
+
+def test_gate3_aligned_study_h5e4_refuses_2h_3h() -> None:
+    """At h = 5e-4 m (1 mm gap), Study A accepts k=1 and refuses 2h and 3h cleanly."""
+    steel_case = build_magnet_plate_case(0.0)
+    eng = _steel_plate_engine(5.0e-4)
+    study = coenergy_delta_study(steel_case, eng, target="magnet")
+
+    assert len(study.steps) == 1
+    assert len(study.refused) == 2
+    step = study.steps[0]
+    assert step.label == "h"
+    assert step.delta_m == pytest.approx(5.0e-4, rel=1e-12)
+    assert step.delta_over_h == pytest.approx(1.0, rel=1e-12)
+    assert step.mesh_nodes_plus == study.base_mesh_nodes
+    assert step.mesh_elements_plus == study.base_mesh_elements
+    assert step.mesh_nodes_minus == study.base_mesh_nodes
+    assert step.mesh_elements_minus == study.base_mesh_elements
+    assert step.gap_cells_plus == 1
+    assert step.gap_cells_minus == 3
+    assert step.gap_cells_plus + step.gap_cells_minus == study.expected_gap_cell_sum == 4
+    assert study.mesh_counts_invariant is True
+    assert study.gap_cell_sum_invariant is True
+    assert study.alignment_invariant_holds is True
+    assert study.f_extrapolated_n is None
+    for _, reason in study.refused:
+        assert E_FORCE_UNSUPPORTED_CASE in reason
+
+
+def test_gate3_aligned_ladder_h2_5e4(_gate3_aligned_study_h2_5e4: DeltaStudyResult) -> None:
+    """At h = 2.5e-4 m, aligned (h, 2h, 3h) runs 3 steps with identical meshes and exact gap sum."""
+    study = _gate3_aligned_study_h2_5e4
+
+    assert len(study.steps) == 3
+    assert len(study.refused) == 0
+    assert [s.label for s in study.steps] == ["h", "2h", "3h"]
+    assert study.expected_gap_cell_sum == 8
+
+    expected_splits = [(3, 5), (2, 6), (1, 7)]
+    for step, (exp_plus, exp_minus) in zip(study.steps, expected_splits, strict=True):
+        assert step.mesh_nodes_plus == study.base_mesh_nodes
+        assert step.mesh_elements_plus == study.base_mesh_elements
+        assert step.mesh_nodes_minus == study.base_mesh_nodes
+        assert step.mesh_elements_minus == study.base_mesh_elements
+        assert step.gap_cells_plus == exp_plus
+        assert step.gap_cells_minus == exp_minus
+        assert (step.gap_cells_plus + step.gap_cells_minus) == study.expected_gap_cell_sum
+
+    assert study.mesh_counts_invariant is True
+    assert study.gap_cell_sum_invariant is True
+    assert study.alignment_invariant_holds is True
+    assert any("cell-alignment invariant HOLDS" in note for note in study.notes)
+
+
+def test_gate3_aligned_delta_h_agrees_with_maxwell(_gate3_steel_results_h5e4) -> None:
+    """Gate 3: aligned delta = h at h = 5e-4 m records alignment and agrees with Maxwell <= 2%."""
+    res_m, res_c = _gate3_steel_results_h5e4
+    f_m = float(res_m.force_n[2])
+    f_c = float(res_c.force_n[2])
+    assert res_c.delta_m == pytest.approx(5.0e-4, rel=1e-12)
+    assert any("cell-aligned; no remeshing" in note for note in res_c.notes)
+    assert f_m > 0.0 and f_c > 0.0
+    agree = abs(f_m - f_c) / max(abs(f_m), abs(f_c))
+    assert agree <= 0.02
+
+
+def test_delta_ladder_analysis_exact_order_and_edge_cases() -> None:
+    """Synthetic ladder checks: exact p=2.0 on arithmetic & geometric grids; None for <3 or non-monotonic."""
+    h = 2.5e-4
+    f0 = 101.5
+    coeff = 1.2e6
+
+    # Arithmetic (h, 2h, 3h) quadratic convergence F(d) = f0 + coeff * d^2
+    arith_steps = tuple(
+        DeltaStep(
+            label="h" if k == 1 else f"{k}h",
+            delta_m=k * h,
+            delta_over_h=float(k),
+            force_n=f0 + coeff * (k * h) ** 2,
+            change_vs_prev_pct=None,
+            mesh_nodes_plus=100,
+            mesh_elements_plus=180,
+            mesh_nodes_minus=100,
+            mesh_elements_minus=180,
+            gap_cells_plus=4 - k,
+            gap_cells_minus=4 + k,
+        )
+        for k in (1, 2, 3)
+    )
+    arith_res = _analyze_delta_ladder(
+        "magnet",
+        h,
+        arith_steps,
+        (),
+        base_mesh_counts=(100, 180),
+        axial_gap_m=1.0e-3,
+    )
+    assert arith_res.monotonic is True
+    assert arith_res.asymptotic is True
+    assert arith_res.p_per_pair[0] == pytest.approx(2.0, rel=1e-9)
+    assert arith_res.p_fit == pytest.approx(2.0, rel=1e-9)
+    assert arith_res.f_extrapolated_n == pytest.approx(f0, rel=1e-12)
+    assert arith_res.alignment_invariant_holds is True
+
+    # Geometric (h, 2h, 4h, 8h) quadratic convergence
+    geom_steps = tuple(
+        DeltaStep(
+            label="h" if k == 1 else f"{k}h",
+            delta_m=k * h,
+            delta_over_h=float(k),
+            force_n=f0 + coeff * (k * h) ** 2,
+            change_vs_prev_pct=None,
+            mesh_nodes_plus=100,
+            mesh_elements_plus=180,
+            mesh_nodes_minus=100,
+            mesh_elements_minus=180,
+            gap_cells_plus=None,
+            gap_cells_minus=None,
+        )
+        for k in (1, 2, 4, 8)
+    )
+    geom_res = _analyze_delta_ladder(
+        "magnet",
+        h,
+        geom_steps,
+        (),
+        base_mesh_counts=(100, 180),
+    )
+    assert geom_res.asymptotic is True
+    assert geom_res.p_fit == pytest.approx(2.0, rel=1e-9)
+    assert geom_res.f_extrapolated_n == pytest.approx(f0, rel=1e-12)
+
+    # Fewer than 3 rungs -> extrapolation unavailable
+    two_res = _analyze_delta_ladder(
+        "magnet",
+        h,
+        arith_steps[:2],
+        (),
+        base_mesh_counts=(100, 180),
+        axial_gap_m=1.0e-3,
+    )
+    assert two_res.f_extrapolated_n is None
+    assert two_res.asymptotic is False
+
+    # Non-monotonic 3 rungs -> no positive observed order, extrapolation unavailable
+    nonmono_steps = (
+        arith_steps[0],
+        DeltaStep(
+            label="2h",
+            delta_m=2 * h,
+            delta_over_h=2.0,
+            force_n=f0 + 0.5,
+            change_vs_prev_pct=None,
+            mesh_nodes_plus=100,
+            mesh_elements_plus=180,
+            mesh_nodes_minus=100,
+            mesh_elements_minus=180,
+            gap_cells_plus=2,
+            gap_cells_minus=6,
+        ),
+        DeltaStep(
+            label="3h",
+            delta_m=3 * h,
+            delta_over_h=3.0,
+            force_n=f0 - 0.2,
+            change_vs_prev_pct=None,
+            mesh_nodes_plus=100,
+            mesh_elements_plus=180,
+            mesh_nodes_minus=100,
+            mesh_elements_minus=180,
+            gap_cells_plus=1,
+            gap_cells_minus=7,
+        ),
+    )
+    nonmono_res = _analyze_delta_ladder(
+        "magnet",
+        h,
+        nonmono_steps,
+        (),
+        base_mesh_counts=(100, 180),
+        axial_gap_m=1.0e-3,
+    )
+    assert nonmono_res.monotonic is False
+    assert nonmono_res.asymptotic is False
+    assert nonmono_res.f_extrapolated_n is None
