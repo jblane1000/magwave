@@ -188,3 +188,45 @@ def load_sheet(
     np.add.at(load, matched[:, 0], nodal)
     np.add.at(load, matched[:, 1], nodal)
     return load
+
+
+def load_magnetization_offset(
+    mesh: Mesh,
+    mask: np.ndarray,
+    offsets: np.ndarray,
+) -> np.ndarray:
+    """Assemble the volume offset load ``f_offset(offsets)`` for magnet elements in ``mask``.
+
+    For each masked element ``e`` with centroid radius ``r_c`` and area ``A_e``, the
+    centroid quadrature weight ``w_e = A_e * r_c`` matches :func:`element_geometric_stiffness`,
+    giving nodal load ``offsets_e * w_e * (b_i + 1 / (3 * r_c))``. ``offsets`` may have
+    shape ``(m_elems,)`` or ``(count_nonzero(mask),)``.
+    """
+    m_elems = int(mesh.elements.shape[0])
+    mask_arr = np.asarray(mask, dtype=bool)
+    if mask_arr.shape != (m_elems,):
+        raise ValueError(f"mask must have shape ({m_elems},), got {mask_arr.shape}")
+
+    n_masked = int(np.count_nonzero(mask_arr))
+    offsets_arr = np.asarray(offsets, dtype=np.float64)
+    if offsets_arr.shape == (m_elems,):
+        sel_offsets = offsets_arr[mask_arr]
+    elif offsets_arr.shape == (n_masked,):
+        sel_offsets = offsets_arr
+    else:
+        raise ValueError(
+            f"offsets must have shape ({m_elems},) or ({n_masked},), got {offsets_arr.shape}"
+        )
+    if not np.all(np.isfinite(sel_offsets)):
+        raise ValueError("offsets entries must be finite")
+
+    load = np.zeros(int(mesh.nodes.shape[0]), dtype=np.float64)
+    if n_masked == 0 or np.all(sel_offsets == 0.0):
+        return load
+
+    area, r_c, _, b, _ = element_geometry(mesh)
+    w_e = area[mask_arr] * r_c[mask_arr]
+    bz_coef = b[mask_arr] + 1.0 / (3.0 * r_c[mask_arr, None])
+    f_elem = (sel_offsets * w_e)[:, None] * bz_coef
+    np.add.at(load, mesh.elements[mask_arr], f_elem)
+    return load

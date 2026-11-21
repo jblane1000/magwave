@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .assembly import load_current_density, load_sheet, stiffness
+from .assembly import load_current_density, load_magnetization_offset, load_sheet, stiffness
 from .engine import E_NOT_CONVERGED, ENGINE_ID, RUNG, Fem2dEngine
 from .field import element_field, sample_field
 from .mesh import Mesh, MeshStats, rectangular_mesh
@@ -28,6 +28,7 @@ __all__ = [
     "dirichlet_nodes",
     "element_field",
     "load_current_density",
+    "load_magnetization_offset",
     "load_sheet",
     "rectangular_mesh",
     "sample_field",

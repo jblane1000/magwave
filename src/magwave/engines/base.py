@@ -103,6 +103,16 @@ class Sample:
 
 
 @dataclass(frozen=True)
+class MagnetOperatingPoint:
+    """Solved operating point ``(H, B)`` on a magnet's second-quadrant demag curve."""
+
+    name: str
+    h_a_per_m: float
+    b_t: float
+    source: str
+
+
+@dataclass(frozen=True)
 class ConvergenceInfo:
     """Solver convergence metadata attached to a :class:`Result` (PRD FR-042)."""
 
@@ -115,6 +125,7 @@ class ConvergenceInfo:
     solver: str
     relaxation: str
     material_model: str
+    magnet_operating_points: tuple[MagnetOperatingPoint, ...] = ()
 
 
 @dataclass(frozen=True)

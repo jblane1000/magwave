@@ -11,6 +11,15 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ..units import MU0
+from .magnets import (
+    MAGNET_LIBRARY_VERSION,
+    MAGNET_SCHEMA,
+    DemagCurve,
+    MagnetGrade,
+    MagnetLibrary,
+    demag_curve_for,
+    load_magnet_library,
+)
 from .nonlinear import BhCurve, bh_curve_for, validate_bh_table
 
 SCHEMA_PREFIX = "magwave.materials/"
@@ -213,9 +222,16 @@ LIBRARY_VERSION: int = load_library().version
 
 __all__ = [
     "LIBRARY_VERSION",
+    "MAGNET_LIBRARY_VERSION",
+    "MAGNET_SCHEMA",
     "SCHEMA",
     "BhCurve",
+    "DemagCurve",
+    "MagnetGrade",
+    "MagnetLibrary",
     "Material",
     "MaterialsLibrary",
+    "demag_curve_for",
     "load_library",
+    "load_magnet_library",
 ]
