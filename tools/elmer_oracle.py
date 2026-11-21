@@ -242,10 +242,10 @@ def main() -> int:
         return 1
 
     workdir = Path(tempfile.mkdtemp(prefix="magwave-elmer-"))
-    os.chmod(workdir, 0o777)  # container runs as a different uid
+    os.chmod(workdir, 0o777)  # noqa: S103 - required: this host runs userns-remapped Docker, and a 0700 dir cannot even be chdir-ed into by the container (verified for default and --user). Scope is one TemporaryDirectory per run.  # container runs as a different uid
     try:
         values, meta = run_elmer(workdir)
-    except Exception as exc:  # noqa: BLE001 - report, do not mask
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 

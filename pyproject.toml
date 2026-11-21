@@ -64,8 +64,36 @@ src = ["src", "tests", "tools"]
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["E501"]  # long doc lines acceptable; formatting is handled by ruff format with line-length above
+# Deterministic checks are the primary review layer for engine-authored code. E/F catch
+# undefined names, B catches the classic agent mistakes, ARG catches dead parameters,
+# RUF catches stale `# noqa` and mis-sorted `__all__`, S is a security fence for future
+# code, TID enforces the module boundary below.
+select = ["E", "F", "I", "UP", "B", "SIM", "ARG", "RUF", "TID", "S"]
+ignore = [
+    "E501",     # long doc lines acceptable; ruff format handles line-length
+    "RUF001",   # unicode in prose is deliberate (en dashes, units like µm)
+    "RUF002",
+    "RUF003",
+    "S101",     # assert is how internal invariants are checked in this codebase
+    "S603",     # subprocess without shell=True is how gmsh/Elmer are driven
+    "S607",     # partial executable paths for those same tools
+    "TID252",   # relative imports inside a package are deliberate
+    "RUF007",   # `zip(xs, xs[1:], strict=False)` states the intent better than pairwise
+]
 
 [tool.ruff.lint.per-file-ignores]
 "docs/**" = ["ALL"]
+# Declared boundaries, not silenced violations: these are exactly the two modules the
+# architecture says may touch the optional dependencies.
+"src/magwave/gui.py" = ["TID251"]      # Qt boundary
+"src/magwave/cad/**" = ["TID251"]      # OCP boundary
+"tests/**" = ["ARG001", "ARG002", "TID251"]  # tests may exercise the boundaries
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Architecture, not advice: the core must stay Qt-free and OCP-free so the library
+# installs and imports without the `gui` / CAD extras. CI proved this by installing
+# core alone, which failed five minutes later and in a different job; this refuses the
+# import on the line where it is written. Add a path here only for a declared boundary
+# module, never to silence one violation.
+"PySide6".msg = "GUI boundary: import Qt only in src/magwave/gui.py, so core stays Qt-free (NFR-3)"
+"OCP".msg = "CAD boundary: import OCP only in magwave.cad.*, so core stays OCP-free (NFR-3)"

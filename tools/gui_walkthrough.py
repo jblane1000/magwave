@@ -185,7 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--shots",
         type=Path,
-        default=Path("/tmp/gw"),
+        default=Path("/tmp/gw"),  # noqa: S108 - disposable screenshots, never a trust boundary
         help="Directory where PNG screenshots are written (default: /tmp/gw).",
     )
     return parser

@@ -775,7 +775,8 @@ def maxwell_force(
             f"axisymmetry numerical check failed: Fx={fx_check:.3e}, Fy={fy_check:.3e}"
         )
 
-    notes = snap_notes + (
+    notes = (
+        *snap_notes,
         f"segment F_z (N): bottom={seg_values['bottom']:+.6e}, outer={seg_values['outer']:+.6e}, "
         f"top={seg_values['top']:+.6e}, axis={seg_values['axis']:.1f}",
         f"axisymmetry check (8 sectors): Fx={fx_check:.3e} N, Fy={fy_check:.3e} N, F_theta=0 (B_phi=0)",

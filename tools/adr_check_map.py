@@ -89,7 +89,18 @@ def scan(root: Path) -> dict:
                 continue
             a_total += 1
             total += 1
+            # A constraint is prose and wraps: accept the tag on the constraint line or on
+            # the two lines that continue it, otherwise every wrapped rule reads as untagged.
             tag = TAG_RE.search(line)
+            if not tag:
+                for follow in lines[number : number + 3]:
+                    # Stop at the next constraint or a paragraph break: a wrapped rule may
+                    # borrow its own continuation, never the following rule's tag.
+                    if CONSTRAINT_RE.match(follow) or not follow.strip():
+                        break
+                    tag = TAG_RE.search(follow)
+                    if tag:
+                        break
             if not tag:
                 untagged.append(
                     {

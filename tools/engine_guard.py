@@ -238,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if command:
         try:
-            os.execvp(command[0], command)
+            os.execvp(command[0], command)  # noqa: S606 - launching without a shell is deliberate
         except OSError as exc:
             print(f"engine_guard: cannot exec {command[0]}: {exc}", file=sys.stderr)
             return EXIT_USAGE

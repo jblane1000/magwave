@@ -28,16 +28,16 @@ import numpy as np
 from .units import MU0
 
 __all__ = [
+    "F_dipole_coaxial",
+    "F_dipoles_general",
+    "F_pointpole_cylinders",
     "cel",
     "cuboid_B",
     "cylinder_B",
     "cylinder_Bz_axis",
     "dipole_B",
-    "ellipk_m",
     "ellipe_m",
-    "F_dipole_coaxial",
-    "F_dipoles_general",
-    "F_pointpole_cylinders",
+    "ellipk_m",
     "halbach_bore_ideal",
     "loop_B",
     "thick_solenoid_Bz",
