@@ -1,0 +1,53 @@
+{
+  "components": [
+    {
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dims": {
+        "radius": 0.01
+      },
+      "kind": "sphere",
+      "material": "steel-team20",
+      "mu_r": 100.0,
+      "name": "steel_sphere",
+      "type": "permeable"
+    },
+    {
+      "h0": 10000.0,
+      "name": "applied_field",
+      "type": "uniform_field"
+    }
+  ],
+  "description": "FR-041 demonstration: linear permeable sphere (R = 0.01 m, steel-team20 overridden to mu_r = 100) in a uniform field H0 = 1e4 A/m along +z. Tier 0 (magpylib) must refuse this case with E_UNSUPPORTED_PERMEABLE; Tier 1 (fem2d) solves it.",
+  "expected": [
+    {
+      "check": "analytic_permeable_sphere_interior_Bz",
+      "quantity": "Bz",
+      "source": "Jackson, Classical Electrodynamics, 3rd ed., §5.10 / Landau & Lifshitz, Electrodynamics of Continuous Media, §8: B_in = MU0 * mu_r * 3 / (mu_r + 2) * H0 (6 significant figures)",
+      "tolerance": 0.01,
+      "unit": "T",
+      "value": 0.0369599
+    }
+  ],
+  "name": "steel_sphere_uniform_field",
+  "probes": [
+    {
+      "component": "z",
+      "point": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quantity": "B"
+    }
+  ],
+  "schema": "magwave.case/1",
+  "sources": [
+    "Jackson, Classical Electrodynamics, 3rd ed., §5.10; Landau & Lifshitz, Electrodynamics of Continuous Media, §8 (analytic permeable sphere in uniform field)",
+    "Compumag TEAM 20 material provenance (magwave.materials v1 steel-team20: shipped mu_r = 294.7, overridden to mu_r = 100.0 for this linear benchmark)"
+  ],
+  "tolerance": 0.01
+}

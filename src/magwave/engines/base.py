@@ -73,6 +73,8 @@ class Capabilities:
     force_methods: tuple[str, ...]
     #: Version string of the code that produces the numbers (provenance, FR-043/FR-053).
     engine_version: str = "unknown"
+    #: Material models this engine supports (e.g. ``"air"``, ``"linear_permeable"``).
+    materials: frozenset[str] = frozenset({"air"})
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,21 @@ class Sample:
 
 
 @dataclass(frozen=True)
+class ConvergenceInfo:
+    """Solver convergence metadata attached to a :class:`Result` (PRD FR-042)."""
+
+    iterations: int
+    final_relative_residual: float
+    residual_history: tuple[float, ...]
+    nodes: int
+    elements: int
+    interface_nodes: int
+    solver: str
+    relaxation: str
+    material_model: str
+
+
+@dataclass(frozen=True)
 class Result:
     """What :meth:`Engine.solve` returns: samples plus the provenance needed to trust them."""
 
@@ -110,6 +127,7 @@ class Result:
     method: str
     samples: tuple[Sample, ...]
     problems: tuple[Problem, ...] = ()
+    convergence: ConvergenceInfo | None = None
 
     def __post_init__(self) -> None:
         errors = [problem for problem in self.problems if problem.is_error]

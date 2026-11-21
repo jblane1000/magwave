@@ -12,7 +12,7 @@ from __future__ import annotations
 import magpylib as magpy
 import numpy as np
 
-from ..cases import Case, Coil, Dipole, Magnet
+from ..cases import Case, Coil, Dipole, Magnet, Permeable, UniformField
 from ..units import MU0
 from .base import Capabilities, Problem, Result, Sample, raise_on_errors
 
@@ -23,10 +23,11 @@ E_UNSUPPORTED_SOURCE_TYPE = "E_UNSUPPORTED_SOURCE_TYPE"
 E_UNSUPPORTED_GEOMETRY = "E_UNSUPPORTED_GEOMETRY"
 E_UNSUPPORTED_COIL = "E_UNSUPPORTED_COIL"
 E_UNSUPPORTED_QUANTITY = "E_UNSUPPORTED_QUANTITY"
+E_UNSUPPORTED_PERMEABLE = "E_UNSUPPORTED_PERMEABLE"
 W_DEMAG_IGNORED = "W_DEMAG_IGNORED"
 
 
-def _label(component: Magnet | Coil | Dipole, index: int) -> str:
+def _label(component: Magnet | Coil | Dipole | Permeable | UniformField, index: int) -> str:
     name = component.name or f"#{index}"
     return f"component {name}"
 
@@ -84,7 +85,7 @@ class MagpylibEngine:
         return Capabilities(
             engine_id=ENGINE_ID,
             rung=RUNG,
-            source_types=frozenset({"magnet", "coil", "dipole"}),
+            source_types=frozenset({"magnet", "coil", "dipole", "uniform_field"}),
             magnet_kinds=frozenset({"cuboid", "cylinder"}),
             coil_kinds=frozenset({"loop"}),
             quantities=frozenset({"B"}),
@@ -102,7 +103,7 @@ class MagpylibEngine:
         problems: list[Problem] = []
         for index, component in enumerate(case.components):
             label = _label(component, index)
-            if isinstance(component, Dipole):
+            if isinstance(component, Dipole | UniformField | Permeable):
                 continue
             if isinstance(component, Magnet):
                 if component.kind == "halbach_cylinder":
@@ -162,6 +163,20 @@ class MagpylibEngine:
                 Problem(
                     E_UNSUPPORTED_SOURCE_TYPE,
                     f"{case.name}: {label} has unsupported type {type(component).__name__}",
+                    "error",
+                )
+            )
+        has_permeable_component = any(isinstance(c, Permeable) for c in case.components)
+        has_permeable_manifest = case.manifest is not None and any(
+            body.role == "permeable_solid" for body in case.manifest.bodies
+        )
+        if has_permeable_component or has_permeable_manifest:
+            problems.append(
+                Problem(
+                    E_UNSUPPORTED_PERMEABLE,
+                    f"{case.name}: case requires permeable_solid / soft-magnetic material "
+                    "response, which Tier 0 (magpylib, free-space only) cannot model; use "
+                    "Tier 1 stage 2 (M5.2), engine 'fem2d' — nothing was solved.",
                     "error",
                 )
             )
@@ -243,14 +258,18 @@ class MagpylibEngine:
             return np.zeros((0, 3), dtype=float)
         scaled, polarised = self._build(case)
         groups = [group for group in (scaled, polarised) if group.children]
-        # One Collection per case, one vectorised getB call; sumup is done here so the
-        # mu_0 reconciliation can be applied to the scaled group alone.
-        collection = magpy.Collection(*groups)
-        per_group = magpy.getB(list(collection.children), points, squeeze=False)
-        per_group = np.asarray(per_group, dtype=float).reshape(len(groups), len(points), 3)
         field = np.zeros((len(points), 3), dtype=float)
-        for group, contribution in zip(groups, per_group, strict=True):
-            field += contribution * self.mu0_ratio if group is scaled else contribution
+        if groups:
+            # One Collection per case, one vectorised getB call; sumup is done here so the
+            # mu_0 reconciliation can be applied to the scaled group alone.
+            collection = magpy.Collection(*groups)
+            per_group = magpy.getB(list(collection.children), points, squeeze=False)
+            per_group = np.asarray(per_group, dtype=float).reshape(len(groups), len(points), 3)
+            for group, contribution in zip(groups, per_group, strict=True):
+                field += contribution * self.mu0_ratio if group is scaled else contribution
+        for component in case.components:
+            if isinstance(component, UniformField):
+                field[:, 2] += MU0 * component.h0
         return field
 
     def _build(self, case: Case) -> tuple[magpy.Collection, magpy.Collection]:
@@ -262,7 +281,7 @@ class MagpylibEngine:
                 polarised.add(self._magnet(component))
             elif isinstance(component, Dipole):
                 scaled.add(magpy.misc.Dipole(moment=component.moment, position=component.center))
-            else:
+            elif isinstance(component, Coil):
                 scaled.add(
                     magpy.current.Circle(
                         current=component.turns * component.current,

@@ -264,8 +264,19 @@ def test_unassigned_manifest_blocks_solve_in_harness_and_cli(
     assert main(["report", str(case_path)]) == 1
     assert "unassigned bodies" in capsys.readouterr().err.lower()
 
-    # Once all bodies are assigned, solve proceeds normally.
+    # Once all bodies are assigned, the unassigned-bodies gate stops blocking — but a
+    # permeable_solid body still cannot be modelled by Tier 0 (FR-041, M5.2): it must be
+    # refused with a capability error rather than answered with a free-space number.
     assign(blocked_manifest, {"magnet": "permanent_magnet", 1: "permeable_solid"})
+    case_path.write_text(blocked_case.to_json(), encoding="utf-8")
+    assert main(["solve", str(case_path), "--points", "0,0,0.5"]) == 2
+    refusal = capsys.readouterr()
+    assert "unassigned bodies" not in refusal.err.lower()
+    assert "E_UNSUPPORTED_PERMEABLE" in refusal.err
+    assert refusal.out.strip() == ""
+
+    # With no permeable body in the manifest, assignment alone unblocks solve.
+    assign(blocked_manifest, {"magnet": "permanent_magnet", 1: "air"})
     case_path.write_text(blocked_case.to_json(), encoding="utf-8")
     assert main(["solve", str(case_path), "--points", "0,0,0.5"]) == 0
     _ = capsys.readouterr()

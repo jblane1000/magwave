@@ -49,7 +49,7 @@ Issues = "https://github.com/jblane1000/magwave/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-magwave = ["py.typed", "benchmarks/*.json"]
+magwave = ["py.typed", "benchmarks/*.json", "materials/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

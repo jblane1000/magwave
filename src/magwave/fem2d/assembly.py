@@ -1,8 +1,8 @@
 """Finite-element assembly for linear axisymmetric magnetostatics (A_phi formulation).
 
 Weak form with azimuthal magnetic vector potential ``A = A_phi(r, z) e_phi``, test function
-``v`` (vanishing on the Dirichlet boundary), reluctivity ``nu = 1 / mu_0``, volume current
-density ``J_phi``, and surface current sheet ``K_phi``:
+``v`` (vanishing on the Dirichlet boundary), element-wise reluctivity ``nu_e = 1 / (mu_0 * mu_r)``,
+volume current density ``J_phi``, and surface current sheet ``K_phi``:
 
 .. math::
 
@@ -19,10 +19,15 @@ Element stiffness matrices use linear triangles with **one-point (centroid) quad
 
     K^e_{ij} = \\nu_e A_e \\left[ r_c (b_i b_j + c_i c_j) + \\frac{1}{3}(b_i + b_j) + \\frac{1}{9 r_c} \\right]
 
-Volume and sheet current load vectors are integrated exactly.
+Volume and sheet current load vectors are integrated exactly. On a tensor-product ``(r, z)``
+grid, every node is shared by all incident elements (no hanging nodes), so element-wise ``nu_e``
+produces a staircase approximation of curved material interfaces rather than a node-conforming
+interface curve.
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 import scipy.sparse as sp
@@ -60,20 +65,41 @@ def element_geometry(
     return area, r_c, z_c, b, c
 
 
-def stiffness(mesh: Mesh, nu: float = 1.0 / MU0) -> sp.csr_matrix:
-    """Assemble the symmetric global stiffness matrix ``K`` in CSR format."""
-    nu_f = float(nu)
-    if nu_f <= 0.0:
-        raise ValueError(f"reluctivity nu must be positive, got {nu!r}")
-
+def element_geometric_stiffness(mesh: Mesh) -> np.ndarray:
+    """Return the ``(m, 3, 3)`` reluctivity-free geometric element matrices ``G^e``."""
     area, r_c, _, b, c = element_geometry(mesh)
     grad_dot = b[:, :, None] * b[:, None, :] + c[:, :, None] * c[:, None, :]
     b_sum = b[:, :, None] + b[:, None, :]
-    k_elem = (
-        nu_f
-        * area[:, None, None]
-        * (r_c[:, None, None] * grad_dot + b_sum / 3.0 + 1.0 / (9.0 * r_c[:, None, None]))
+    return area[:, None, None] * (
+        r_c[:, None, None] * grad_dot + b_sum / 3.0 + 1.0 / (9.0 * r_c[:, None, None])
     )
+
+
+def stiffness(mesh: Mesh, nu: float | np.ndarray = 1.0 / MU0) -> sp.csr_matrix:
+    """Assemble the symmetric global stiffness matrix ``K`` in CSR format.
+
+    ``nu`` may be a positive scalar reluctivity (applied uniformly) or a ``(m,)`` array of
+    positive per-element reluctivities where ``m = mesh.elements.shape[0]``.
+    """
+    m = int(mesh.elements.shape[0])
+    if np.ndim(nu) == 0:
+        if isinstance(nu, bool):
+            raise ValueError(f"reluctivity nu must be a positive number, got {nu!r}")
+        nu_f = float(nu)
+        if not math.isfinite(nu_f) or nu_f <= 0.0:
+            raise ValueError(f"reluctivity nu must be positive and finite, got {nu!r}")
+        nu_factor: float | np.ndarray = nu_f
+    else:
+        nu_arr = np.asarray(nu, dtype=np.float64)
+        if nu_arr.shape != (m,):
+            raise ValueError(
+                f"element reluctivity array must have shape ({m},), got {nu_arr.shape}"
+            )
+        if not np.all(np.isfinite(nu_arr)) or np.any(nu_arr <= 0.0):
+            raise ValueError("element reluctivity entries must be positive and finite")
+        nu_factor = nu_arr[:, None, None]
+
+    k_elem = nu_factor * element_geometric_stiffness(mesh)
 
     n_nodes = int(mesh.nodes.shape[0])
     rows = np.repeat(mesh.elements, 3, axis=1).ravel()

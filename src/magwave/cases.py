@@ -26,15 +26,19 @@ byte-identical. Unknown keys are rejected at every level.
       "tolerance": <relative>                # must equal the tightest expected tolerance
     }
 
-    <component> — one of three, discriminated by "type":
-      magnet: {"type": "magnet", "kind": "cuboid" | "cylinder" | "halbach_cylinder",
-               "dims": {...metres...}, "br": [bx, by, bz]  # tesla
-               [, "center": [x, y, z], "demag_curve": null | "ref", "name": ""]}
-      coil:   {"type": "coil", "kind": "loop" | "solenoid",
-               "dims": {...metres...}, "current": <A>, "turns": <int>
-               [, "center": [x, y, z], "name": ""]}
-      dipole: {"type": "dipole", "moment": [mx, my, mz]  # A m^2
-               [, "center": [x, y, z], "name": ""]}
+    <component> — one of five, discriminated by "type":
+      magnet:        {"type": "magnet", "kind": "cuboid" | "cylinder" | "halbach_cylinder",
+                      "dims": {...metres...}, "br": [bx, by, bz]  # tesla
+                      [, "center": [x, y, z], "demag_curve": null | "ref", "name": ""]}
+      coil:          {"type": "coil", "kind": "loop" | "solenoid",
+                      "dims": {...metres...}, "current": <A>, "turns": <int>
+                      [, "center": [x, y, z], "name": ""]}
+      dipole:        {"type": "dipole", "moment": [mx, my, mz]  # A m^2
+                      [, "center": [x, y, z], "name": ""]}
+      permeable:     {"type": "permeable", "kind": "sphere" | "cylinder" | "block",
+                      "dims": {...metres...}, "material": "<library name>"
+                      [, "center": [x, y, z], "mu_r": <float>, "name": ""]}
+      uniform_field: {"type": "uniform_field", "h0": <A/m> [, "name": ""]}
 
     dims by kind (metres):
       cuboid           {"size_x", "size_y", "size_z"}
@@ -44,6 +48,8 @@ byte-identical. Unknown keys are rejected at every level.
       solenoid         {"inner_radius", "outer_radius", "length"}
                        # inner == outer is a thin current sheet; inner < outer is a
                        # volume winding with J = turns*current / ((outer-inner)*length)
+      sphere           {"radius"}
+      block            {"size_x", "size_y", "size_z"}
 
     <probe>    = {"point": [x, y, z], "quantity": "B" | "F",
                   "component": "x" | "y" | "z" | "magnitude"}
@@ -72,6 +78,11 @@ MAGNET_DIMS: dict[str, tuple[str, ...]] = {
 COIL_DIMS: dict[str, tuple[str, ...]] = {
     "loop": ("radius",),
     "solenoid": ("inner_radius", "outer_radius", "length"),
+}
+PERMEABLE_DIMS: dict[str, tuple[str, ...]] = {
+    "sphere": ("radius",),
+    "cylinder": ("radius", "length"),
+    "block": ("size_x", "size_y", "size_z"),
 }
 PROBE_QUANTITIES = ("B", "F")
 PROBE_COMPONENTS = ("x", "y", "z", "magnitude")
@@ -156,6 +167,14 @@ def _name(value: Any, where: str) -> str:
     if value is None:
         return ""
     return _text(value, where)
+
+
+def _optional_name(value: Any, where: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        _fail(where, f"expected a string, got {type(value).__name__}")
+    return value
 
 
 # --------------------------------------------------------------------------------------
@@ -325,9 +344,112 @@ class Dipole:
         )
 
 
-Component = Magnet | Coil | Dipole
+@dataclass(frozen=True)
+class Permeable:
+    """A soft-magnetic permeable body referencing a shipped material and optional ``mu_r``."""
 
-COMPONENT_TYPES: dict[str, Any] = {"magnet": Magnet, "coil": Coil, "dipole": Dipole}
+    kind: str
+    dims: Mapping[str, float]
+    material: str
+    center: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    mu_r: float | None = None
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        from .materials import load_library
+
+        if self.kind not in PERMEABLE_DIMS:
+            _fail(
+                "permeable.kind",
+                f"expected one of {sorted(PERMEABLE_DIMS)}, got {self.kind!r}",
+            )
+        dims = _dims(self.dims, "permeable.dims", PERMEABLE_DIMS[self.kind])
+        material = _text(self.material, "permeable.material")
+        try:
+            load_library().get(material)
+        except ValueError as exc:
+            _fail("permeable.material", str(exc))
+        object.__setattr__(self, "dims", dims)
+        object.__setattr__(self, "material", material)
+        object.__setattr__(self, "center", _triple(self.center, "permeable.center"))
+        if self.mu_r is not None:
+            mu_r_val = _number(self.mu_r, "permeable.mu_r")
+            if mu_r_val <= 0.0:
+                _fail("permeable.mu_r", "must be positive (> 0)")
+            object.__setattr__(self, "mu_r", mu_r_val)
+        object.__setattr__(self, "name", _optional_name(self.name, "permeable.name"))
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": "permeable",
+            "name": self.name,
+            "kind": self.kind,
+            "dims": dict(self.dims),
+            "center": list(self.center),
+            "material": self.material,
+        }
+        if self.mu_r is not None:
+            payload["mu_r"] = self.mu_r
+        return _sorted(payload)
+
+    @classmethod
+    def from_dict(cls, data: Any, where: str = "permeable") -> Permeable:
+        doc = _mapping(data, where)
+        _keys(
+            doc,
+            where,
+            ("type", "kind", "dims", "material"),
+            ("center", "mu_r", "name"),
+        )
+        if doc["type"] != "permeable":
+            _fail(where, f"expected type 'permeable', got {doc['type']!r}")
+        raw_center = doc.get("center", (0.0, 0.0, 0.0))
+        center = tuple(raw_center) if isinstance(raw_center, list) else raw_center
+        return cls(
+            kind=_text(doc["kind"], f"{where}.kind"),
+            dims=doc["dims"],
+            material=doc["material"],
+            center=center,
+            mu_r=doc.get("mu_r"),
+            name=doc.get("name", ""),
+        )
+
+
+@dataclass(frozen=True)
+class UniformField:
+    """A uniform applied magnetic field ``H0 * z_hat`` in free space (``h0`` in A/m)."""
+
+    h0: float
+    name: str = ""
+
+    def __post_init__(self) -> None:
+        h0_val = _number(self.h0, "uniform_field.h0")
+        if h0_val == 0.0:
+            _fail("uniform_field.h0", "must be non-zero (A/m)")
+        object.__setattr__(self, "h0", h0_val)
+        object.__setattr__(self, "name", _optional_name(self.name, "uniform_field.name"))
+
+    def to_dict(self) -> dict[str, Any]:
+        return _sorted({"type": "uniform_field", "name": self.name, "h0": self.h0})
+
+    @classmethod
+    def from_dict(cls, data: Any, where: str = "uniform_field") -> UniformField:
+        doc = _mapping(data, where)
+        _keys(doc, where, ("type", "h0"), ("name",))
+        if doc["type"] != "uniform_field":
+            _fail(where, f"expected type 'uniform_field', got {doc['type']!r}")
+        return cls(h0=doc["h0"], name=doc.get("name", ""))
+
+
+Component = Magnet | Coil | Dipole | Permeable | UniformField
+
+COMPONENT_TYPES: dict[str, Any] = {
+    "magnet": Magnet,
+    "coil": Coil,
+    "dipole": Dipole,
+    "permeable": Permeable,
+    "uniform_field": UniformField,
+}
 
 
 def component_from_dict(data: Any, where: str = "component") -> Component:
@@ -492,8 +614,10 @@ class Case:
         if not expected:
             _fail("case.expected", "at least one expected value is required")
         for component in components:
-            if not isinstance(component, Magnet | Coil | Dipole):
+            if not isinstance(component, Magnet | Coil | Dipole | Permeable | UniformField):
                 _fail("case.components", f"unsupported component {type(component).__name__}")
+        if sum(isinstance(component, UniformField) for component in components) > 1:
+            _fail("case.components", "at most one uniform_field component is allowed")
         for probe in probes:
             if not isinstance(probe, Probe):
                 _fail("case.probes", f"unsupported probe {type(probe).__name__}")

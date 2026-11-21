@@ -1,0 +1,65 @@
+{
+  "components": [
+    {
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "dims": {
+        "length": 0.06,
+        "radius": 0.01
+      },
+      "kind": "cylinder",
+      "material": "steel-team20",
+      "name": "steel_core",
+      "type": "permeable"
+    },
+    {
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "current": 1.0,
+      "dims": {
+        "inner_radius": 0.015,
+        "length": 0.1,
+        "outer_radius": 0.025
+      },
+      "kind": "solenoid",
+      "name": "excitation_coil",
+      "turns": 1000,
+      "type": "coil"
+    }
+  ],
+  "description": "Saturating TEAM 20 steel cylinder (R = 10 mm, L = 60 mm) inside a coaxial thick solenoid (R1 = 15 mm, R2 = 25 mm, L = 100 mm, N = 1000 turns, I = 1 A) for M5.2 Phase B nonlinear FEM and Elmer cross-comparison.",
+  "expected": [
+    {
+      "check": "nonlinear_fem_reference",
+      "quantity": "Bz",
+      "source": "Elmer MagnetoDynamics2D v9.0 nonlinear cross-comparison (tools/elmer_permeable.py, 22366 nodes, 1.0 m box)",
+      "tolerance": 0.03,
+      "unit": "T",
+      "value": 0.143836
+    }
+  ],
+  "name": "steel_cylinder_solenoid_nonlinear",
+  "probes": [
+    {
+      "component": "z",
+      "point": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quantity": "B"
+    }
+  ],
+  "schema": "magwave.case/1",
+  "sources": [
+    "Compumag TEAM 20 B-H table (magwave.materials v1 steel-team20, 38 points, Ms = 2.16 T)",
+    "Elmer MagnetoDynamics2D v9.0 second-code nonlinear cross-comparison (tools/elmer_permeable.py)"
+  ],
+  "tolerance": 0.03
+}

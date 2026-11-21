@@ -368,7 +368,7 @@ def test_engine_protocol_and_registration(capsys: pytest.CaptureFixture[str]) ->
     assert caps.coil_kinds == frozenset({"solenoid"})
     assert caps.quantities == frozenset({"B"})
     assert caps.force_methods == ()
-    assert caps.engine_version.endswith("+m5.1")
+    assert caps.engine_version.endswith("+m5.2b")
 
     rc = magwave.cli.main(["bench", "--engine", "fem2d", "--report-accuracy"])
     assert rc == 0
