@@ -73,6 +73,8 @@ class Capabilities:
     force_methods: tuple[str, ...]
     #: Version string of the code that produces the numbers (provenance, FR-043/FR-053).
     engine_version: str = "unknown"
+    #: Material models this engine supports (e.g. ``"air"``, ``"linear_permeable"``).
+    materials: frozenset[str] = frozenset({"air"})
 
 
 @dataclass(frozen=True)

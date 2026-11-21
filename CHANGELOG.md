@@ -6,6 +6,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **M5.2 Phase A — Linear permeable steel & FR-041 gate**: versioned material library
+  (`magwave.materials` v1 with TEAM 20 `steel-team20` and per-case `mu_r` overrides), additive
+  `permeable` and `uniform_field` components in `magwave.case/1`, Tier 0 (`magpylib`) FR-041
+  refusal (`E_UNSUPPORTED_PERMEABLE`), and Tier 1 (`fem2d` `+m5.2a`) element-wise linear `nu` and
+  Dirichlet applied-field solves validated against the analytic permeable sphere within 1 %.
+
 ## [0.0.1] — 2026-11-17
 
 ### Added

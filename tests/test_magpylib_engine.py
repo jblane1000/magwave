@@ -53,7 +53,7 @@ def test_engine_satisfies_protocol_and_declares_capabilities() -> None:
     assert caps.engine_id == "magpylib"
     assert caps.rung == "second-code"
     assert caps.engine_version == magpy.__version__
-    assert caps.source_types == {"magnet", "coil", "dipole"}
+    assert caps.source_types == {"magnet", "coil", "dipole", "uniform_field"}
     assert caps.magnet_kinds == {"cuboid", "cylinder"}
     assert caps.coil_kinds == {"loop"}
     assert caps.quantities == {"B"}

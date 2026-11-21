@@ -151,6 +151,7 @@ def build_report_payload(
         "engine": result.engine_id,
         "engine_version": result.engine_version,
         "rung": result.rung,
+        "method": result.method,
         "units": _units_summary(result),
         "case_file": display_case_file(case_file),
         "corpus_case": is_corpus,
@@ -177,6 +178,7 @@ def format_report_markdown(payload: Mapping[str, Any]) -> str:
         f"rung: {payload['rung']}",
         f"units: {payload['units']}",
         f"case_file: {payload['case_file']}",
+        f"method: {payload['method']}",
         "",
     ]
     is_corpus = bool(payload["corpus_case"])

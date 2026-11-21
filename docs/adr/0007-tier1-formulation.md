@@ -154,3 +154,89 @@ and corpus accuracy report (`magwave bench --engine fem2d --report-accuracy`) bo
   `E_UNSUPPORTED_MATERIAL` pointing to Tier 1 stage 2 (M5.2), never silently approximated as air.
 - `tests/test_package.py` and `tools/check_licence_boundary.py` continue to enforce zero GPL imports
   across `src/`.
+
+## Appendix A — M5.2 stage A: linear permeable media
+
+- Date: 2026-11-21
+- Scope: linear soft-magnetic media (`mu_r` scalar constant per body) and uniform applied field
+  `H_0 z_hat` in `magwave.fem2d` (`Fem2dEngine` version suffix `+m5.2a`), versioned material
+  library `magwave.materials` (`v1`), additive `magwave.case/1` component schemas (`permeable`,
+  `uniform_field`), and the Tier 0 FR-041 refusal gate (`E_UNSUPPORTED_PERMEABLE`).
+
+All figures below were measured on 2026-11-21 in this checkout using
+`env -u PYTHONPATH .venv/bin/python` (Python 3.12.3, NumPy 2.5.5, SciPy 1.18.1).
+
+### A.1 Element-wise reluctivity and centroid assignment on the tensor mesh
+
+`stiffness(mesh, nu)` accepts either a scalar reluctivity (preserving Stage 1 byte-identical) or a
+`(m,)` array of positive per-element reluctivities `nu_e = 1 / (MU0 * mu_r)` multiplied directly into
+each element's `k_elem` row without Python loops (`src/magwave/fem2d/assembly.py`).
+
+Because `rectangular_mesh` builds an axis-aligned tensor-product `(r, z)` grid where every node is
+shared across all incident triangles, there are no hanging nodes. Material regions for
+axisymmetric `sphere` and `cylinder` `permeable` components are assigned **per element by triangle
+centroid** (`(r_c, z_c)` inside the body) rather than by snapping mesh edges to curved boundaries.
+Non-axisymmetric `block` bodies are rejected in `validate()` with `E_UNSUPPORTED_GEOMETRY`, and
+overlapping `permeable` bodies are rejected with `E_UNSUPPORTED_MATERIAL`.
+
+**Staircase-interface limitation (honest statement).** Axis-aligned `(r, z)` breakpoints place exact
+edges on bounding planes (`r = r_c +- R`, `z = z_c +- R`), **not** along curved spherical surfaces.
+A sphere's surface is therefore represented by an *element-wise staircase* approximation on the
+tensor grid, not a node-conforming interface curve.
+
+### A.2 Measured convergence on the analytic permeable sphere (`tests/test_fem2d_permeable.py`)
+
+Benchmark case (`examples/steel-sphere-uniform-field.json`): sphere of radius `R = 0.010` m at the
+origin, material `steel-team20` (shipped `mu_r = 294.7` from initial-segment secant of the TEAM 20
+table) with per-case override `mu_r = 100.0`, uniform applied field `H_0 = 1.0e4` A/m along `+z`,
+analytic interior flux density `B_in = MU0 * mu_r * 3 / (mu_r + 2) * H_0 = 3.695991e-02` T
+(Jackson §5.10 / Landau & Lifshitz Electrodynamics §8).
+
+Because the curved surface is staircased, the 1 % (`1e-2`) gate is not met at `R/8` or `R/16`; it
+is met monotonically at `R/32` and `R/64` (reported passing pair):
+
+| Level | `h` (m) | Nodes | Elements | Interface nodes | Computed `B_z` (T) | Analytic `B_z` (T) | Rel. err | Gate (`<= 1e-2`) |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `R/8` | `1.2500e-03` | 1 431 | 2 704 | 31 | `4.032305e-02` | `3.695991e-02` | `9.0994e-02` | FAIL |
+| `R/16` | `6.2500e-04` | 3 003 | 5 776 | 63 | `3.814140e-02` | `3.695991e-02` | `3.1967e-02` | FAIL |
+| `R/32` (reported 1) | `3.1250e-04` | 6 670 | 12 996 | 117 | `3.732261e-02` | `3.695991e-02` | `9.8133e-03` | PASS |
+| `R/64` (reported 2) | `1.5625e-04` | 17 578 | 34 596 | 247 | `3.717376e-02` | `3.695991e-02` | `5.7858e-03` | PASS |
+
+At the default engine setting (`Fem2dEngine()`, `h = R/40 = 2.5000e-04` m, 9 180 nodes, 17 956
+elements), measured error is `7.6651e-03` with relative linear-solve residual `4.508e-14` in
+`0.0438 s`. Pole normal-`B` continuity across the top pole (`(0, 0, R - h/4)` vs `(0, 0, R + h/4)`
+at `h = 1.5625e-04` m) measures `3.48865900e-02` T on both sides (relative difference `1.9890e-16`).
+
+### A.3 Applied-field Dirichlet condition and truncation estimate
+
+A `uniform_field` component (`H_0 z_hat`) is imposed without adding a volume RHS load by setting
+non-homogeneous Dirichlet values `A_phi = MU0 * H_0 * r / 2` on the outer domain boundaries and
+keeping `A_phi = 0` on the symmetry axis `r = 0` via symmetric elimination in
+`solve_axisymmetric(..., values=...)` (`src/magwave/fem2d/solve.py`).
+
+- **Exactness in free space / air (`mu_r = 1.0`):** Because `A_phi = MU0 * H_0 * r / 2` lies in the
+  P1 finite-element space, the air-only sphere (`mu_r = 1.0` at `h = 6.25e-4` m) reproduces
+  `MU0 * H_0 = 1.256637061436e-02` T to `7.413e-14` relative and matches the no-permeable solve
+  to `7.620e-14` relative.
+- **Far-field truncation estimate:** The induced dipole perturbation of a sphere of radius `R`
+  decays as `(R / r)^3`. With `l_max = 2R` and default `far_field_factor = 5.0`, the outer boundary
+  sits at `11 R`, so `(R / 11R)^3 ~ 7.5e-4` (< 0.1 %). Measured sensitivity at `h = 1.5625e-4` m:
+
+| `far_field_factor` | Nodes | Elements | Computed `B_z` (T) | Rel. err vs analytic | Solve wall time |
+|---:|---:|---:|---:|---:|---:|
+| `2.0` (`5 R`) | 15 753 | 30 976 | `3.66390978e-02` | `8.6801e-03` | `0.0669 s` |
+| `5.0` (`11 R`, default) | 17 578 | 34 596 | `3.71737551e-02` | `5.7858e-03` | `0.0849 s` |
+| `10.0` (`21 R`) | 19 110 | 37 636 | `3.72123431e-02` | `6.8298e-03` | `0.0942 s` |
+
+The boundary shift from `5x` to `10x` is `1.04e-3` relative (~0.10 %), confirming that `5x`
+truncation is well below the `5.79e-3` staircase discretisation floor at `R/64`.
+
+### A.4 FR-041 gate and Stage B deferrals
+
+- **FR-041 Tier 0 gate:** `MagpylibEngine` supports `uniform_field` by analytic superposition
+  (`MU0 * h0` added to `B_z`, without applying `mu0_ratio`) and refuses any case containing a
+  `permeable` component or a `permeable_solid` manifest body with `E_UNSUPPORTED_PERMEABLE`,
+  pointing to `Tier 1 stage 2 (M5.2)` (`fem2d`) and producing zero numeric samples.
+- **Deferred to Stage B (not implemented here):** nonlinear `B(H)` curve evaluation and
+  differentiation, fixed-point / Newton-Raphson iteration, CAD body meshing for `permeable_solid`
+  manifests, and external Elmer cross-comparison.
