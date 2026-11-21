@@ -13,6 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `permeable` and `uniform_field` components in `magwave.case/1`, Tier 0 (`magpylib`) FR-041
   refusal (`E_UNSUPPORTED_PERMEABLE`), and Tier 1 (`fem2d` `+m5.2a`) element-wise linear `nu` and
   Dirichlet applied-field solves validated against the analytic permeable sphere within 1 %.
+- **M5.2 Phase B — Nonlinear B–H, consistent Newton, FR-042 convergence reporting, Elmer cross-check**:
+  monotone `BhCurve` (`PchipInterpolator` + `MU0`-sloped `Ms` saturation asymptote), consistent
+  tangent Newton–Raphson with Armijo backtracking (`magwave.fem2d.nonlinear`), `ConvergenceInfo`
+  attached to `Result` and surfaced in `magwave report` and `--max-iterations` (`E_NOT_CONVERGED`),
+  plus external Elmer `MagnetoDynamics2D` nonlinear cross-comparison (`tools/elmer_permeable.py`,
+  `0.0665 %` agreement at `1.0 A`).
 
 ## [0.0.1] — 2026-11-17
 

@@ -11,6 +11,7 @@ from typing import Any
 
 from .base import (
     Capabilities,
+    ConvergenceInfo,
     Engine,
     EngineError,
     Problem,
@@ -23,6 +24,7 @@ from .base import (
 
 __all__ = [
     "Capabilities",
+    "ConvergenceInfo",
     "Engine",
     "EngineError",
     "Fem2dEngine",

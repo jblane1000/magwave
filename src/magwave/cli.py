@@ -89,6 +89,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="bench --engine: also measure and report relative error on accuracy-gated cases",
     )
     parser.add_argument(
+        "--max-iterations",
+        metavar="N",
+        type=int,
+        default=None,
+        help="bench/report --engine fem2d: maximum nonlinear Newton iterations",
+    )
+    parser.add_argument(
         "--out",
         metavar="PATH",
         default=None,
@@ -136,7 +143,11 @@ def _run_bench(json_path: str | None) -> int:
 
 
 def _run_engine_bench(
-    engine_name: str, json_path: str | None, *, report_accuracy: bool = False
+    engine_name: str,
+    json_path: str | None,
+    *,
+    report_accuracy: bool = False,
+    max_iterations: int | None = None,
 ) -> int:
     from .benchmarks import (
         engine_all_passed,
@@ -149,7 +160,7 @@ def _run_engine_bench(
         run_engine_benchmarks,
     )
 
-    engine = _make_engine(engine_name)
+    engine = _make_engine(engine_name, max_iterations=max_iterations)
     cases = load_corpus()
     rows = run_engine_benchmarks(cases, engine)
     print(format_engine_table(rows))
@@ -179,7 +190,7 @@ def _run_engine_bench(
     return 0 if engine_all_passed(rows) else 1
 
 
-def _make_engine(name: str):
+def _make_engine(name: str, *, max_iterations: int | None = None, material_model: str = "linear"):
     if name == "magpylib":
         from .engines.magpylib_engine import MagpylibEngine
 
@@ -187,7 +198,10 @@ def _make_engine(name: str):
     if name == "fem2d":
         from .fem2d.engine import Fem2dEngine
 
-        return Fem2dEngine()
+        kwargs: dict[str, object] = {"material_model": material_model}
+        if max_iterations is not None:
+            kwargs["max_iterations"] = max_iterations
+        return Fem2dEngine(**kwargs)  # type: ignore[arg-type]
     raise ValueError(f"unknown engine {name!r}")  # pragma: no cover - argparse choices
 
 
@@ -320,8 +334,14 @@ def _one_line(text: object) -> str:
     return " ".join(str(text).splitlines())
 
 
-def _run_report(case_path: str, engine_name: str, out_path: str | None) -> int:
-    from .cases import Case, CaseError
+def _run_report(
+    case_path: str,
+    engine_name: str,
+    out_path: str | None,
+    *,
+    max_iterations: int | None = None,
+) -> int:
+    from .cases import Case, CaseError, Permeable
     from .engines.base import EngineError
     from .report import render_report
 
@@ -338,7 +358,16 @@ def _run_report(case_path: str, engine_name: str, out_path: str | None) -> int:
         except UnassignedBodiesError as exc:
             print(f"magwave report: {_one_line(exc)}", file=sys.stderr)
             return 1
-    engine = _make_engine(engine_name)
+    material_model = "linear"
+    if engine_name == "fem2d":
+        permeables = [comp for comp in case.components if isinstance(comp, Permeable)]
+        if permeables and all(comp.mu_r is None for comp in permeables):
+            from .materials import load_library
+
+            lib = load_library()
+            if all(lib.get(comp.material).bh_table is not None for comp in permeables):
+                material_model = "nonlinear"
+    engine = _make_engine(engine_name, max_iterations=max_iterations, material_model=material_model)
     try:
         markdown = render_report(case, engine, case_file=case_path)
     except (EngineError, CaseError) as exc:
@@ -481,7 +510,7 @@ def _run_import(
 # --------------------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_intermixed_args(argv)
     if args.command is None:
         print(f"magwave {__version__} — M1 skeleton. See docs/PRD.md.")
         return 0
@@ -497,10 +526,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{args.command}: --defeature-below applies to import only")
     if args.report_accuracy and (args.command != "bench" or args.engine is None):
         parser.error("--report-accuracy is valid only together with bench --engine")
+    if args.max_iterations is not None:
+        if args.command not in ("bench", "report") or args.engine != "fem2d":
+            parser.error("--max-iterations is valid only with bench or report and --engine fem2d")
+        if args.max_iterations < 1:
+            parser.error("--max-iterations must be a positive integer (>= 1)")
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
-        return _run_engine_bench(args.engine, args.json, report_accuracy=args.report_accuracy)
+        return _run_engine_bench(
+            args.engine,
+            args.json,
+            report_accuracy=args.report_accuracy,
+            max_iterations=args.max_iterations,
+        )
     if args.command == "solve":
         if args.case is None:
             parser.error("solve: a case JSON path is required")
@@ -519,7 +558,12 @@ def main(argv: list[str] | None = None) -> int:
         if args.case is None:
             print("magwave report: a case JSON path is required", file=sys.stderr)
             return 1
-        return _run_report(args.case, args.engine or "magpylib", args.out)
+        return _run_report(
+            args.case,
+            args.engine or "magpylib",
+            args.out,
+            max_iterations=args.max_iterations,
+        )
     if args.command == "gui":
         if args.json or args.engine:
             parser.error("gui: --json and --engine do not apply to gui")

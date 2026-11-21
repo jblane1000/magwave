@@ -65,6 +65,16 @@ def element_geometry(
     return area, r_c, z_c, b, c
 
 
+def element_geometric_stiffness(mesh: Mesh) -> np.ndarray:
+    """Return the ``(m, 3, 3)`` reluctivity-free geometric element matrices ``G^e``."""
+    area, r_c, _, b, c = element_geometry(mesh)
+    grad_dot = b[:, :, None] * b[:, None, :] + c[:, :, None] * c[:, None, :]
+    b_sum = b[:, :, None] + b[:, None, :]
+    return area[:, None, None] * (
+        r_c[:, None, None] * grad_dot + b_sum / 3.0 + 1.0 / (9.0 * r_c[:, None, None])
+    )
+
+
 def stiffness(mesh: Mesh, nu: float | np.ndarray = 1.0 / MU0) -> sp.csr_matrix:
     """Assemble the symmetric global stiffness matrix ``K`` in CSR format.
 
@@ -89,14 +99,7 @@ def stiffness(mesh: Mesh, nu: float | np.ndarray = 1.0 / MU0) -> sp.csr_matrix:
             raise ValueError("element reluctivity entries must be positive and finite")
         nu_factor = nu_arr[:, None, None]
 
-    area, r_c, _, b, c = element_geometry(mesh)
-    grad_dot = b[:, :, None] * b[:, None, :] + c[:, :, None] * c[:, None, :]
-    b_sum = b[:, :, None] + b[:, None, :]
-    k_elem = (
-        nu_factor
-        * area[:, None, None]
-        * (r_c[:, None, None] * grad_dot + b_sum / 3.0 + 1.0 / (9.0 * r_c[:, None, None]))
-    )
+    k_elem = nu_factor * element_geometric_stiffness(mesh)
 
     n_nodes = int(mesh.nodes.shape[0])
     rows = np.repeat(mesh.elements, 3, axis=1).ravel()

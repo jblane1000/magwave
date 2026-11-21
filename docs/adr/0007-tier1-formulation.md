@@ -240,3 +240,133 @@ truncation is well below the `5.79e-3` staircase discretisation floor at `R/64`.
 - **Deferred to Stage B (not implemented here):** nonlinear `B(H)` curve evaluation and
   differentiation, fixed-point / Newton-Raphson iteration, CAD body meshing for `permeable_solid`
   manifests, and external Elmer cross-comparison.
+
+## Appendix B — M5.2 stage B: nonlinear B–H and Newton
+
+- Date: 2026-11-21
+- Scope: monotone `BhCurve` (`PchipInterpolator`) material response (`src/magwave/materials/nonlinear.py`),
+  consistent tangent Newton–Raphson solver with Armijo backtracking (`src/magwave/fem2d/nonlinear.py`),
+  FR-042 `ConvergenceInfo` reporting in `Result`, `magwave report`, and `--max-iterations`, plus the
+  external Elmer `MagnetoDynamics2D` nonlinear cross-comparison (`tools/elmer_permeable.py`). CAD body
+  meshing for `permeable_solid` manifests remains deferred to M6.
+
+All figures below were measured on 2026-11-21 in this checkout using
+`env -u PYTHONPATH .venv/bin/python` (Python 3.12.3, NumPy 2.5.5, SciPy 1.18.1, Elmer 9.0 via
+Docker `scimulate/elmer`).
+
+### B.1 Nonlinear B–H law and saturation extrapolation (`BhCurve`)
+
+`BhCurve` (`src/magwave/materials/nonlinear.py`) inverts `|B| -> H` once per `Material` (cached)
+using `scipy.interpolate.PchipInterpolator` across the strictly monotone tabulated points (rejecting
+non-monotone `H` or `B` tables loudly without sorting or dropping points):
+
+- **Below the first non-zero table point (`0 <= |B| < B_1`):** linear from the origin at shipped
+  `mu_r`, `H(|B|) = |B| / (MU0 * mu_r)` on `[0, 0.9 * B_1]` (`0.009 T` for `steel-team20`), joined
+  via a monotone `C^1` Hermite cubic bridge on `(0.9 * B_1, B_1)` to `(B_1, H_1, H'(B_1))` when
+  rounded `mu_r` differs slightly from `B_1 / (MU0 * H_1)`.
+- **Above the last table point (`|B| > B_last = 2.30 T`):** requires `saturation_B` (`Ms = 2.16 T`
+  for `steel-team20`; `ValueError` naming material and field if `None`). Rather than extending the last
+  table segment's finite permeability slope (which for TEAM 20 is `~1.59 * MU0` and would delay
+  physical saturation indefinitely), the curve approaches the physical saturation asymptote
+  `B = MU0 * H + Ms` (`H = (|B| - Ms) / MU0`, `dB/dH = MU0`) via a monotone `C^1` Hermite bridge on
+  `(2.30, 2.388938) T` (bridging the `-23.6 kA/m` offset jump cleanly so Newton line search never
+  stalls across `2.30 T`), and evaluates `H = (|B| - Ms) / MU0` exactly for `|B| >= 2.388938 T`.
+
+### B.2 Consistent tangent Newton–Raphson and Armijo backtracking
+
+Using the same weak-form element matrix `G^e` from `assembly.element_geometric_stiffness(mesh)` and
+centroid flux density `|B_e| = sqrt(B_r^2 + B_z^2)` (`B_r = -sum_k c_k A_k`,
+`B_z = sum_k (b_k + 1/(3 r_c)) A_k`), the discrete residual is:
+
+```
+R(A) = K(nu(|B|)) A - f          (constrained rows: A_i - g_i)
+```
+
+Differentiating `nu(|B_e|) G^e A_e` yields the **consistent symmetric tangent Jacobian** assembled
+into a single CSR matrix (`src/magwave/fem2d/nonlinear.py`):
+
+```
+J = K(nu) + sum_e outer_e( (G^e A_e), (dnu/db)_e * (db/dA)_e )
+(db/dA_k)_e = ( B_r * (-c_k) + B_z * (b_k + 1/(3 r_c)) ) / |B_e|
+(dnu/db)_e  = ( H'(|B_e|)*|B_e| - H(|B_e|) ) / |B_e|^2
+```
+
+Elements with `|B_e| <= 1e-15 T` return `nu(0) = 1/(MU0*mu_r)`, `dnu/db = 0`, and `db/dA = 0` directly
+without `0 / 0`. Central-difference verification on a coarse TEAM 20 cylinder+solenoid mesh across 5
+random perturbations (`tests/test_fem2d_nonlinear.py`) measured relative errors `1.383e-11`,
+`1.053e-11`, `1.010e-11`, `8.830e-12`, and `1.082e-11` (all `<< 1e-6`).
+
+**Line search & convergence criteria (as implemented):**
+
+- Initial iterate: `A^(0) = g` (`0` on free DOFs, Dirichlet `g` on constrained DOFs), so iteration 1
+  performs the initial-permeability linear solve.
+- Armijo backtracking on `||R||_2`: `ARMIJO_ALPHA0 = 1.0`, `ARMIJO_RHO = 0.5`, `ARMIJO_C = 1e-4`,
+  `ARMIJO_MAX_HALVINGS = 12`, accepting `||R(A + alpha dA)||_2 <= (1 - c * alpha) ||R(A)||_2`.
+- Convergence gate: `||R||_2 / ||f||_2 <= tol` (`DEFAULT_TOL = 1e-8`, `DEFAULT_MAX_ITERATIONS = 50`).
+- Failure policy: hitting `max_iterations` or failing Armijo backtracking raises `EngineError` with
+  `E_NOT_CONVERGED` naming the case, iteration count, cap, and final relative residual; no `Result` or
+  samples are returned, and `magwave report --engine fem2d --max-iterations 1 <case>` exits `1` with
+  empty stdout. Linear runs (`material_model="linear"` or linear-only materials) continue to use
+  direct `spsolve` unchanged and report `iterations = 1`.
+
+### B.3 Measured convergence, saturation sweep, and Elmer comparison
+
+Saturating cylinder benchmark (`steel-team20` cylinder `R = 10 mm`, `L = 60 mm` inside coaxial
+solenoid `R1 = 15 mm`, `R2 = 25 mm`, `L = 100 mm`, `N = 1000`, default `Fem2dEngine(material_model="nonlinear")`,
+`2 958` nodes, `5 676` elements, `33` interface nodes, `I = 1.0 A`):
+
+| Iteration | Relative residual `\|\|R\|\| / \|\|f\|\|` |
+|---:|---:|
+| 1 | `1.338776e-02` |
+| 2 | `1.092056e-05` |
+| 3 | `1.697520e-09` |
+
+Saturation current sweep at probe `(0, 0, 0)` (`B_z`):
+
+| Current (A) | Probe `B_z` (T) | `dB/dH` (T*m/A) | `(dB/dH) / MU0` | Newton iters | Final rel. residual |
+|---:|---:|---:|---:|---:|---:|
+| `0.5` | `0.070655` | `9.058758e-04` | `720.8731` | 3 | `6.972e-11` |
+| `1.0` | `0.140492` | `1.832705e-03` | `1458.4205` | 3 | `1.698e-09` |
+| `2.0` | `0.278204` | `3.929663e-03` | `3127.1261` | 4 | `6.272e-13` |
+| `5.0` | `0.724099` | `2.167427e-03` | `1724.7837` | 4 | `1.290e-12` |
+| `10.0` | `1.462570` | `1.313233e-04` | `104.5038` | 4 | `1.642e-10` |
+| `20.0` | `2.206893` | `2.004515e-06` | `1.5951` | 7 | `1.703e-12` |
+| `40.0` | `2.527636` | `1.256637e-06` | `1.0000` | 8 | `4.677e-10` |
+
+TEAM 20 exhibits the physical Rayleigh permeability increase from the initial toe (`mu_r ~ 295`) to its
+steepest slope around `~0.28 T` (`I = 2.0 A`), then `dB/dH` drops strictly monotonically through the
+knee and saturates to `(dB/dH)/MU0 = 1.0000` (`B_z = 2.5276 T > 2.30 T`) at `40.0 A`.
+
+External Elmer 9.0 second-code comparison (`tools/elmer_permeable.py`, `I = 1.0 A`, `1.0 m` air box,
+`Real Cubic Monotone` `H-B Curve` fed from `magwave.materials` JSON):
+
+| Code | Mesh | Nonlinear iters | Wall time | `B_z(0, 0, 0)` (T) | Ratio | Rel. diff | Gate (`<= 3 %`) |
+|---|---|---:|---:|---:|---:|---:|---|
+| Elmer `MagnetoDynamics2D` | `22 366` nodes / `22 050` quads | 5 | `1.93 s` | `0.143836` | — | — | — |
+| MagWave `Fem2dEngine` (`h = 1e-3` m) | `9 291` nodes / `18 144` tris | 4 | `0.198 s` | `0.143932` | `1.00066` | `0.0665 %` | PASS |
+
+### B.4 Review of §6 (`Omega`-formulation judgement)
+
+Stage B does **not** change §6's decision to keep axisymmetric `A_phi` in Tier 1 and defer scalar
+potential `Omega` to Tier 2 (3-D). In 2-D axisymmetry, `A_phi` already requires only one scalar unknown
+per node, embeds thick/sheet coil currents directly on the RHS without topological cuts or Biot–Savart
+pre-passes, yields a symmetric positive-definite consistent Newton tangent matrix, converges in 3–8
+iterations across deep saturation, and agrees with Elmer `MagnetoDynamics2D` to `0.0665 %` on the
+nonlinear steel cylinder. The trigger for `Omega` remains unchanged: full 3-D permeable steel
+assemblies in Tier 2 (where 3-D vector `A` introduces three edge DOFs per edge plus gauging) or curved
+3-D material interface accuracy limits in later milestones.
+
+### B.5 Known limitation — default-mesh under-resolution of the shipped nonlinear example
+
+The shipped example `examples/steel-cylinder-solenoid-nonlinear.json` solved through the CLI at the
+**default** mesh (`magwave report --engine fem2d`, `2 958` nodes / `5 676` elements) reports
+`B_z(0, 0, 0) = 0.140492 T`, which is **2.32 % below Elmer (`0.143836 T`)** and **2.39 % below our own
+refined-mesh run (`0.143932 T`, `h = 1e-3` m, `9 291` nodes, `tools/elmer_permeable.py`)**. This is
+**mesh convergence, not disagreement in the physics**: refine the same case and the two codes agree to
+`0.0665 %` (B.3). The gap is a property of the automatically chosen default element size for this
+geometry, and it is larger than the `3 %` Elmer gate only because that gate is applied at the refined
+`h = 1e-3` m discretisation.
+
+**Follow-up (not done in M5.2):** expose mesh density control in the case schema and CLI (e.g. a
+per-case `mesh.element_size` / refinement level) so the shipped examples solve at a documented,
+reproducible resolution instead of an implicit default.

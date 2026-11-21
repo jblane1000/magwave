@@ -157,6 +157,19 @@ def build_report_payload(
         "corpus_case": is_corpus,
         "probes": probe_rows,
     }
+    if result.convergence is not None:
+        conv = result.convergence
+        payload["convergence"] = {
+            "elements": int(conv.elements),
+            "final_relative_residual": float(conv.final_relative_residual),
+            "interface_nodes": int(conv.interface_nodes),
+            "iterations": int(conv.iterations),
+            "material_model": conv.material_model,
+            "nodes": int(conv.nodes),
+            "relaxation": conv.relaxation,
+            "residual_history": [float(val) for val in conv.residual_history],
+            "solver": conv.solver,
+        }
     if name_mismatch:
         payload["corpus_name_mismatch"] = True
     if is_corpus:
@@ -179,8 +192,22 @@ def format_report_markdown(payload: Mapping[str, Any]) -> str:
         f"units: {payload['units']}",
         f"case_file: {payload['case_file']}",
         f"method: {payload['method']}",
-        "",
     ]
+    conv = payload.get("convergence")
+    if isinstance(conv, Mapping):
+        lines.extend(
+            [
+                f"iterations: {conv['iterations']}",
+                f"final_relative_residual: {float(conv['final_relative_residual']):.6e}",
+                f"nodes: {conv['nodes']}",
+                f"elements: {conv['elements']}",
+                f"interface_nodes: {conv['interface_nodes']}",
+                f"solver: {conv['solver']}",
+                f"relaxation: {conv['relaxation']}",
+                f"material_model: {conv['material_model']}",
+            ]
+        )
+    lines.append("")
     is_corpus = bool(payload["corpus_case"])
     if is_corpus:
         lines.extend(

@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from ..units import MU0
+from .nonlinear import BhCurve, bh_curve_for, validate_bh_table
 
 SCHEMA_PREFIX = "magwave.materials/"
 SCHEMA = f"{SCHEMA_PREFIX}1"
@@ -42,29 +43,12 @@ def _non_empty_str(value: Any, where: str) -> str:
     return value
 
 
-def _parse_bh_table(raw: Any, where: str) -> tuple[tuple[float, float], ...] | None:
+def _parse_bh_table(
+    raw: Any, where: str, *, name: str | None = None
+) -> tuple[tuple[float, float], ...] | None:
     if raw is None:
         return None
-    if isinstance(raw, str | bytes) or not isinstance(raw, Sequence):
-        raise ValueError(f"{where}: expected a list of [H, B] pairs or null")
-    if len(raw) < 2:
-        raise ValueError(f"{where}: bh_table must contain at least 2 points")
-    points: list[tuple[float, float]] = []
-    prev_h = -math.inf
-    prev_b = -math.inf
-    for idx, pair in enumerate(raw):
-        if isinstance(pair, str | bytes) or not isinstance(pair, Sequence) or len(pair) != 2:
-            raise ValueError(f"{where}[{idx}]: expected a 2-element [H, B] pair")
-        h_val = _non_negative_finite(pair[0], f"{where}[{idx}][0]")
-        b_val = _non_negative_finite(pair[1], f"{where}[{idx}][1]")
-        if h_val <= prev_h:
-            raise ValueError(f"{where}[{idx}]: H must be strictly increasing ({h_val} <= {prev_h})")
-        if b_val <= prev_b:
-            raise ValueError(f"{where}[{idx}]: B must be strictly increasing ({b_val} <= {prev_b})")
-        prev_h = h_val
-        prev_b = b_val
-        points.append((h_val, b_val))
-    return tuple(points)
+    return validate_bh_table(raw, name if name is not None else where)
 
 
 @dataclass(frozen=True)
@@ -83,7 +67,7 @@ class Material:
         object.__setattr__(
             self,
             "bh_table",
-            _parse_bh_table(self.bh_table, f"material({self.name}).bh_table"),
+            _parse_bh_table(self.bh_table, f"material({self.name}).bh_table", name=self.name),
         )
         if self.saturation_B is not None:
             object.__setattr__(
@@ -101,6 +85,10 @@ class Material:
         """Linear reluctivity ``1 / (MU0 * mu_r)`` in A*m / (T*m) = m/H."""
         return 1.0 / (MU0 * self.mu_r)
 
+    def bh_curve(self) -> BhCurve:
+        """Return the cached monotone :class:`BhCurve` for this material."""
+        return bh_curve_for(self)
+
 
 class MaterialsLibrary:
     """In-memory view over the validated shipped materials library."""
@@ -114,6 +102,11 @@ class MaterialsLibrary:
                 raise ValueError(f"duplicate material name {mat.name!r}")
             by_name[mat.name] = mat
         self._materials = by_name
+
+    @classmethod
+    def from_dict(cls, data: Any) -> MaterialsLibrary:
+        """Parse and validate a materials library mapping using the shipped schema rules."""
+        return _parse_library(data)
 
     def names(self) -> tuple[str, ...]:
         """Sorted tuple of available material names."""
@@ -221,6 +214,7 @@ LIBRARY_VERSION: int = load_library().version
 __all__ = [
     "LIBRARY_VERSION",
     "SCHEMA",
+    "BhCurve",
     "Material",
     "MaterialsLibrary",
     "load_library",

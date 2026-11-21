@@ -9,16 +9,36 @@ import numpy as np
 
 from .. import __version__
 from ..cases import Case, Coil, Dipole, Magnet, Permeable, UniformField
-from ..engines.base import Capabilities, EngineError, Problem, Result, Sample, raise_on_errors
-from ..materials import LIBRARY_VERSION, load_library
+from ..engines.base import (
+    Capabilities,
+    ConvergenceInfo,
+    EngineError,
+    Problem,
+    Result,
+    Sample,
+    raise_on_errors,
+)
+from ..materials import LIBRARY_VERSION, Material, load_library
 from ..units import MU0
 from .assembly import element_geometry, load_current_density, load_sheet
 from .field import sample_field
 from .mesh import Mesh, rectangular_mesh
+from .nonlinear import (
+    ARMIJO_ALPHA0,
+    ARMIJO_C,
+    ARMIJO_MAX_HALVINGS,
+    ARMIJO_RHO,
+    DEFAULT_MAX_ITERATIONS,
+    DEFAULT_TOL,
+    NonlinearConvergenceError,
+    count_interface_nodes,
+    solve_axisymmetric_nonlinear,
+)
 from .solve import SolveReport, dirichlet_nodes, solve_axisymmetric
 
 ENGINE_ID = "fem2d"
 RUNG = "Tier 1"
+MATERIAL_MODELS = ("linear", "nonlinear")
 
 E_UNSUPPORTED_SOURCE_TYPE = "E_UNSUPPORTED_SOURCE_TYPE"
 E_UNSUPPORTED_GEOMETRY = "E_UNSUPPORTED_GEOMETRY"
@@ -29,6 +49,7 @@ E_UNSUPPORTED_MATERIAL = "E_UNSUPPORTED_MATERIAL"
 E_UNSUPPORTED_MANIFEST = "E_UNSUPPORTED_MANIFEST"
 E_ACCURACY_UNREACHABLE = "E_ACCURACY_UNREACHABLE"
 E_PROBE_OUTSIDE_DOMAIN = "E_PROBE_OUTSIDE_DOMAIN"
+E_NOT_CONVERGED = "E_NOT_CONVERGED"
 W_DEMAG_IGNORED = "W_DEMAG_IGNORED"
 
 _AXIS_TOL = 1e-12
@@ -109,6 +130,9 @@ class Fem2dEngine:
         certified_accuracy: float = 1e-2,
         domain: tuple[float, float, float] | None = None,
         refinement_box: tuple[float, float, float, float] | None = None,
+        material_model: str = "linear",
+        tol: float = DEFAULT_TOL,
+        max_iterations: int = DEFAULT_MAX_ITERATIONS,
     ) -> None:
         if element_size is not None and (
             not math.isfinite(element_size) or float(element_size) <= 0.0
@@ -120,6 +144,23 @@ class Fem2dEngine:
             raise ValueError(f"growth must be > 1.0, got {growth!r}")
         if not math.isfinite(certified_accuracy) or float(certified_accuracy) <= 0.0:
             raise ValueError(f"certified_accuracy must be positive, got {certified_accuracy!r}")
+        if material_model not in MATERIAL_MODELS:
+            raise ValueError(
+                f"material_model must be one of {MATERIAL_MODELS}, got {material_model!r}"
+            )
+        if (
+            isinstance(tol, bool)
+            or not isinstance(tol, int | float)
+            or not math.isfinite(tol)
+            or float(tol) <= 0.0
+        ):
+            raise ValueError(f"tol must be positive and finite, got {tol!r}")
+        if (
+            isinstance(max_iterations, bool)
+            or not isinstance(max_iterations, int)
+            or max_iterations < 1
+        ):
+            raise ValueError(f"max_iterations must be a positive integer, got {max_iterations!r}")
 
         self._element_size = None if element_size is None else float(element_size)
         self._far_field_factor = float(far_field_factor)
@@ -129,12 +170,30 @@ class Fem2dEngine:
         self._refinement_box = (
             None if refinement_box is None else tuple(float(v) for v in refinement_box)
         )
+        self._material_model = material_model
+        self._tol = float(tol)
+        self._max_iterations = int(max_iterations)
         self._version = f"{__version__}+m5.2a"
 
     @property
     def certified_accuracy(self) -> float:
         """Relative accuracy certified by this stage (default ``1e-2``, i.e. 1 %)."""
         return self._certified_accuracy
+
+    @property
+    def material_model(self) -> str:
+        """Selected permeable material law (``'linear'`` or ``'nonlinear'``)."""
+        return self._material_model
+
+    @property
+    def tol(self) -> float:
+        """Relative residual convergence tolerance for nonlinear solves."""
+        return self._tol
+
+    @property
+    def max_iterations(self) -> int:
+        """Maximum Newton iterations allowed for nonlinear solves."""
+        return self._max_iterations
 
     def capabilities(self) -> Capabilities:
         return Capabilities(
@@ -146,7 +205,7 @@ class Fem2dEngine:
             quantities=frozenset({"B"}),
             force_methods=(),
             engine_version=self._version,
-            materials=frozenset({"air", "linear_permeable"}),
+            materials=frozenset({"air", "linear_permeable", "nonlinear_permeable"}),
         )
 
     @property
@@ -190,7 +249,29 @@ class Fem2dEngine:
                         )
                     )
                     continue
-                if not math.isfinite(mat.mu_r) or mat.mu_r <= 0.0:
+                if self._material_model == "nonlinear":
+                    if mat.bh_table is None:
+                        problems.append(
+                            Problem(
+                                E_UNSUPPORTED_MATERIAL,
+                                f"{case.name}: {label} material {mat.name!r} has no B-H table data; "
+                                "cannot solve with material_model='nonlinear'",
+                                "error",
+                            )
+                        )
+                        continue
+                    if component.mu_r is not None:
+                        problems.append(
+                            Problem(
+                                E_UNSUPPORTED_MATERIAL,
+                                f"{case.name}: {label} specifies linear mu_r override "
+                                f"({component.mu_r:g}), which cannot be combined with "
+                                "material_model='nonlinear'",
+                                "error",
+                            )
+                        )
+                        continue
+                elif not math.isfinite(mat.mu_r) or mat.mu_r <= 0.0:
                     problems.append(
                         Problem(
                             E_UNSUPPORTED_MATERIAL,
@@ -509,17 +590,20 @@ class Fem2dEngine:
 
         return mesh, load, probes_rz
 
-    def _element_reluctivity(self, mesh: Mesh, case: Case) -> tuple[float | np.ndarray, list[str]]:
-        """Return scalar or ``(m,)`` element reluctivity and provenance lines."""
+    def _permeable_assignments(
+        self, mesh: Mesh, case: Case
+    ) -> tuple[list[tuple[Permeable, np.ndarray, Material, str]], np.ndarray]:
+        """Return per-body element masks/materials and per-element region IDs."""
         permeables = [c for c in case.components if isinstance(c, Permeable)]
+        m_elems = int(mesh.elements.shape[0])
+        region_ids = np.zeros(m_elems, dtype=np.int64)
         if not permeables:
-            return 1.0 / MU0, []
+            return [], region_ids
 
         _, r_c, z_c, _, _ = element_geometry(mesh)
-        nu_arr = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
         lib = load_library()
-        notes: list[str] = []
-        for component in permeables:
+        assignments: list[tuple[Permeable, np.ndarray, Material, str]] = []
+        for body_idx, component in enumerate(permeables, start=1):
             mat, prov_line = lib.with_override(component.material, component.mu_r)
             rc = math.hypot(component.center[0], component.center[1])
             zc = component.center[2]
@@ -532,6 +616,20 @@ class Fem2dEngine:
                 mask = (np.abs(r_c - rc) <= rad) & (np.abs(z_c - zc) <= half_len)
             else:  # pragma: no cover - validate() rejects other kinds
                 raise AssertionError(f"unvalidated permeable kind {component.kind!r}")
+            assignments.append((component, mask, mat, prov_line))
+            if self._material_model == "nonlinear" or mat.mu_r != 1.0:
+                region_ids[mask] = body_idx
+        return assignments, region_ids
+
+    def _element_reluctivity(self, mesh: Mesh, case: Case) -> tuple[float | np.ndarray, list[str]]:
+        """Return scalar or ``(m,)`` element reluctivity and provenance lines."""
+        assignments, _ = self._permeable_assignments(mesh, case)
+        if not assignments:
+            return 1.0 / MU0, []
+
+        nu_arr = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
+        notes: list[str] = []
+        for _, mask, mat, prov_line in assignments:
             nu_arr[mask] = mat.nu()
             notes.append(prov_line)
         return nu_arr, notes
@@ -554,11 +652,126 @@ class Fem2dEngine:
         """Validate and solve ``case``, returning ``(Result, SolveReport)``."""
         warnings = raise_on_errors(ENGINE_ID, self.validate(case))
         mesh, load, probes_rz = self._build_mesh_and_load(case)
-        nu, material_notes = self._element_reluctivity(mesh, case)
+        assignments, region_ids = self._permeable_assignments(mesh, case)
+        interface_nodes = count_interface_nodes(mesh, region_ids)
         constrained, values, uniform = self._dirichlet_bc(mesh, case)
-        a_phi, report = solve_axisymmetric(
-            mesh, load, nu=nu, constrained=constrained, values=values
-        )
+
+        use_nonlinear = self._material_model == "nonlinear" and bool(assignments)
+        if use_nonlinear:
+            element_curves = [(mask, mat.bh_curve()) for _, mask, mat, _ in assignments]
+            nl_notes = [
+                f"{mat.name} nonlinear B-H (PCHIP)"
+                + (f", Ms={mat.saturation_B:g} T" if mat.saturation_B is not None else "")
+                for _, _, mat, _ in assignments
+            ]
+            try:
+                a_phi, report, history, _ = solve_axisymmetric_nonlinear(
+                    mesh,
+                    load,
+                    element_curves,
+                    constrained=constrained,
+                    values=values,
+                    tol=self._tol,
+                    max_iterations=self._max_iterations,
+                )
+            except NonlinearConvergenceError as exc:
+                raise EngineError(
+                    ENGINE_ID,
+                    [
+                        Problem(
+                            E_NOT_CONVERGED,
+                            f"{case.name}: Newton solver did not converge after {exc.iterations} "
+                            f"iteration(s) (cap={exc.max_iterations}, "
+                            f"final_relative_residual={exc.final_relative_residual:.6e}, "
+                            f"reason={exc.reason}); no result produced",
+                            "error",
+                        )
+                    ],
+                ) from exc
+
+            material_desc = "; ".join(nl_notes)
+            relaxation_desc = (
+                f"Armijo backtracking, alpha0={ARMIJO_ALPHA0:g}, rho={ARMIJO_RHO:g}, "
+                f"c={ARMIJO_C:g}, max {ARMIJO_MAX_HALVINGS} halvings"
+            )
+            solver_desc = "Newton + Armijo backtracking, scipy.sparse.linalg.spsolve"
+            convergence = ConvergenceInfo(
+                iterations=report.iterations,
+                final_relative_residual=float(report.relative_residual),
+                residual_history=tuple(float(val) for val in history),
+                nodes=report.mesh.nodes,
+                elements=report.mesh.elements,
+                interface_nodes=interface_nodes,
+                solver=solver_desc,
+                relaxation=relaxation_desc,
+                material_model=material_desc,
+            )
+            bc_desc = (
+                f"applied field H0 = {uniform.h0:g} A/m via Dirichlet A = MU0*H0*r/2 "
+                f"at {self._far_field_factor:g}x far field (A=0 on axis)"
+                if uniform is not None
+                else f"Dirichlet A=0 on axis and at {self._far_field_factor:g}x far field"
+            )
+            method_str = ", ".join(
+                [
+                    "axisymmetric A_phi FEM, linear triangles, centroid quadrature",
+                    f"element-wise nonlinear nu(|B|) from magwave.materials v{LIBRARY_VERSION} "
+                    f"({material_desc})",
+                    bc_desc,
+                    solver_desc,
+                ]
+            )
+        else:
+            if not assignments:
+                nu: float | np.ndarray = 1.0 / MU0
+                material_notes: list[str] = []
+            else:
+                nu_arr = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
+                material_notes = []
+                for _, mask, mat, prov_line in assignments:
+                    nu_arr[mask] = mat.nu()
+                    material_notes.append(prov_line)
+                nu = nu_arr
+
+            a_phi, report = solve_axisymmetric(
+                mesh, load, nu=nu, constrained=constrained, values=values
+            )
+            if material_notes or uniform is not None:
+                method_parts = [
+                    "axisymmetric A_phi FEM, linear triangles, centroid quadrature",
+                ]
+                if material_notes:
+                    method_parts.append(
+                        f"element-wise nu from magwave.materials v{LIBRARY_VERSION} "
+                        f"({'; '.join(material_notes)})"
+                    )
+                if uniform is not None:
+                    method_parts.append(
+                        f"applied field H0 = {uniform.h0:g} A/m via Dirichlet A = MU0*H0*r/2 "
+                        f"at {self._far_field_factor:g}x far field (A=0 on axis)"
+                    )
+                else:
+                    method_parts.append(
+                        f"Dirichlet A=0 on axis and at {self._far_field_factor:g}x far field"
+                    )
+                method_parts.append("scipy.sparse.linalg.spsolve")
+                method_str = ", ".join(method_parts)
+            else:
+                method_str = self.method
+
+            convergence = ConvergenceInfo(
+                iterations=1,
+                final_relative_residual=float(report.relative_residual),
+                residual_history=(float(report.relative_residual),),
+                nodes=report.mesh.nodes,
+                elements=report.mesh.elements,
+                interface_nodes=interface_nodes,
+                solver="direct, scipy.sparse.linalg.spsolve",
+                relaxation="none (direct linear solve)",
+                material_model=(
+                    "air (mu_r = 1)" if not material_notes else "; ".join(material_notes)
+                ),
+            )
 
         pts_rz = np.asarray(probes_rz, dtype=np.float64)
         br_bz = sample_field(mesh, a_phi, pts_rz)
@@ -581,29 +794,6 @@ class Fem2dEngine:
                 )
             )
 
-        if material_notes or uniform is not None:
-            method_parts = [
-                "axisymmetric A_phi FEM, linear triangles, centroid quadrature",
-            ]
-            if material_notes:
-                method_parts.append(
-                    f"element-wise nu from magwave.materials v{LIBRARY_VERSION} "
-                    f"({'; '.join(material_notes)})"
-                )
-            if uniform is not None:
-                method_parts.append(
-                    f"applied field H0 = {uniform.h0:g} A/m via Dirichlet A = MU0*H0*r/2 "
-                    f"at {self._far_field_factor:g}x far field (A=0 on axis)"
-                )
-            else:
-                method_parts.append(
-                    f"Dirichlet A=0 on axis and at {self._far_field_factor:g}x far field"
-                )
-            method_parts.append("scipy.sparse.linalg.spsolve")
-            method_str = ", ".join(method_parts)
-        else:
-            method_str = self.method
-
         result = Result(
             engine_id=ENGINE_ID,
             engine_version=self._version,
@@ -611,6 +801,7 @@ class Fem2dEngine:
             method=method_str,
             samples=tuple(samples),
             problems=tuple(warnings),
+            convergence=convergence,
         )
         return result, report
 
@@ -623,7 +814,9 @@ class Fem2dEngine:
         return (
             f"Fem2dEngine(element_size={self._element_size!r}, "
             f"far_field_factor={self._far_field_factor!r}, growth={self._growth!r}, "
-            f"certified_accuracy={self._certified_accuracy!r})"
+            f"certified_accuracy={self._certified_accuracy!r}, "
+            f"material_model={self._material_model!r}, tol={self._tol!r}, "
+            f"max_iterations={self._max_iterations!r})"
         )
 
 
