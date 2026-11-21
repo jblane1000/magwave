@@ -202,7 +202,9 @@ def test_mapper_on_this_repository_has_no_dangling_links():
 def test_mapper_reads_a_tag_on_a_continuation_line(tmp_path):
     """A constraint wraps in prose; the tag may sit on the line that continues it."""
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_y.py").write_text("def test_wrapped() -> None:\n    pass\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_y.py").write_text(
+        "def test_wrapped() -> None:\n    pass\n", encoding="utf-8"
+    )
     _write_adr(
         tmp_path,
         "0005-demo.md",
