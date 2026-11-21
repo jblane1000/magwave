@@ -8,6 +8,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **M5.4 — Tier 1 forces (Maxwell stress + coenergy), torque refusal, Tier 0 permeable force gate**:
+  `magwave.fem2d.force` (`maxwell_force`, `coenergy_force`, `magnetic_coenergy`, `torque`
+  refusing with `E_TORQUE_NOT_MEANINGFUL`) wired into `Fem2dEngine.force` (`+m5.4`), exact
+  `BhCurve.magnetic_energy_density`, Tier 0 (`magpylib`) `E_UNSUPPORTED_FORCE_PERMEABLE` refusal,
+  Elmer virtual-work cross-check (`tools/elmer_force.py`, `0.545 %` vs Maxwell / `1.065 %` vs
+  coenergy), and 7-gate report (`tools/force_report.py`).
 - **M5.2 Phase A — Linear permeable steel & FR-041 gate**: versioned material library
   (`magwave.materials` v1 with TEAM 20 `steel-team20` and per-case `mu_r` overrides), additive
   `permeable` and `uniform_field` components in `magwave.case/1`, Tier 0 (`magpylib`) FR-041

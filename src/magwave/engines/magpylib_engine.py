@@ -24,6 +24,7 @@ E_UNSUPPORTED_GEOMETRY = "E_UNSUPPORTED_GEOMETRY"
 E_UNSUPPORTED_COIL = "E_UNSUPPORTED_COIL"
 E_UNSUPPORTED_QUANTITY = "E_UNSUPPORTED_QUANTITY"
 E_UNSUPPORTED_PERMEABLE = "E_UNSUPPORTED_PERMEABLE"
+E_UNSUPPORTED_FORCE_PERMEABLE = "E_UNSUPPORTED_FORCE_PERMEABLE"
 E_UNSUPPORTED_DEMAG_CURVE = "E_UNSUPPORTED_DEMAG_CURVE"
 
 
@@ -172,7 +173,21 @@ class MagpylibEngine:
         has_permeable_manifest = case.manifest is not None and any(
             body.role == "permeable_solid" for body in case.manifest.bodies
         )
-        if has_permeable_component or has_permeable_manifest:
+        has_permeable = has_permeable_component or has_permeable_manifest
+        has_force_probe = any(probe.quantity == "F" for probe in case.probes)
+        if has_force_probe and has_permeable:
+            problems.append(
+                Problem(
+                    E_UNSUPPORTED_FORCE_PERMEABLE,
+                    f"{case.name}: case requests force F in the presence of permeable material "
+                    "(force in the presence of permeable material requires Maxwell stress / "
+                    "virtual work on the FEM mesh), which Tier 0 (magpylib, free-space only) "
+                    "cannot model; use Tier 1 engine 'fem2d' (Fem2dEngine.force) — nothing was "
+                    "solved.",
+                    "error",
+                )
+            )
+        elif has_permeable:
             problems.append(
                 Problem(
                     E_UNSUPPORTED_PERMEABLE,
@@ -184,12 +199,16 @@ class MagpylibEngine:
             )
         for index, probe in enumerate(case.probes):
             if probe.quantity == "F":
+                if has_permeable:
+                    continue
                 problems.append(
                     Problem(
                         E_UNSUPPORTED_QUANTITY,
                         f"{case.name}: probe #{index} asks for force F; this engine samples B "
                         "only (magpylib core has no closed-form force, only mesh-integrated "
-                        "getFT, and Tier 0 force is the FR-052 analytic path)",
+                        "getFT; free-space analytic force is answered by Tier 0 FR-052 "
+                        "magwave.analytic, and axisymmetric FEM force by Tier 1 engine 'fem2d' "
+                        "via Fem2dEngine.force)",
                         "error",
                     )
                 )
