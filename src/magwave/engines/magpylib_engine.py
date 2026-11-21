@@ -24,7 +24,7 @@ E_UNSUPPORTED_GEOMETRY = "E_UNSUPPORTED_GEOMETRY"
 E_UNSUPPORTED_COIL = "E_UNSUPPORTED_COIL"
 E_UNSUPPORTED_QUANTITY = "E_UNSUPPORTED_QUANTITY"
 E_UNSUPPORTED_PERMEABLE = "E_UNSUPPORTED_PERMEABLE"
-W_DEMAG_IGNORED = "W_DEMAG_IGNORED"
+E_UNSUPPORTED_DEMAG_CURVE = "E_UNSUPPORTED_DEMAG_CURVE"
 
 
 def _label(component: Magnet | Coil | Dipole | Permeable | UniformField, index: int) -> str:
@@ -124,14 +124,16 @@ class MagpylibEngine:
                             "error",
                         )
                     )
-                elif component.demag_curve is not None:
+                if component.demag_curve is not None:
                     problems.append(
                         Problem(
-                            W_DEMAG_IGNORED,
-                            f"{case.name}: {label} names demag curve "
-                            f"{component.demag_curve!r}; this engine treats the magnet as "
-                            "rigidly polarised (no demagnetisation)",
-                            "warning",
+                            E_UNSUPPORTED_DEMAG_CURVE,
+                            f"{case.name}: {label} names demag curve {component.demag_curve!r}; "
+                            "Tier 0 (magpylib) would treat it as rigidly polarised, no "
+                            "demagnetising field, no operating point, and cannot locate an "
+                            "operating point on a second-quadrant curve; use Tier 1 (fem2d) "
+                            "— nothing was solved.",
+                            "error",
                         )
                     )
                 continue

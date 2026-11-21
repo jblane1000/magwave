@@ -1,0 +1,61 @@
+{
+  "schema": "magwave.magnets/1",
+  "version": 1,
+  "magnets": [
+    {
+      "name": "N42-20C",
+      "grade": "N42",
+      "family": "NdFeB",
+      "curve": [
+        [-955000.0, -1.2002],
+        [-900000.0, -0.5053],
+        [-860000.0, 0.0],
+        [-800000.0, 0.1147],
+        [-700000.0, 0.3304],
+        [-600000.0, 0.516],
+        [-500000.0, 0.6677],
+        [-400000.0, 0.8024],
+        [-300000.0, 0.932],
+        [-200000.0, 1.0607],
+        [-100000.0, 1.1883],
+        [0.0, 1.315]
+      ],
+      "br_ref": 1.315,
+      "hcb": 860000.0,
+      "hcj": 955000.0,
+      "bhmax": 334000.0,
+      "t_ref_c": 20.0,
+      "alpha_br_per_c": -0.0012,
+      "alpha_hcj_per_c": -0.00618,
+      "t_max_c": 80.0,
+      "provenance": "N42 (sintered NdFeB) — Br/HcB/HcJ/(BH)max and alpha coefficients transcribed from the Arnold N42 grade data as recorded in docs/research/materials-bh-data.md §4.1 (read 2026-11-17); interior second-quadrant points RECONSTRUCTED from those four published constants (square intrinsic curve), not digitised from a printed curve."
+    },
+    {
+      "name": "Y30H-1-20C",
+      "grade": "Y30H-1",
+      "family": "Ferrite",
+      "curve": [
+        [-262000.0, -0.3292],
+        [-257000.0, -0.158],
+        [-252000.0, 0.0],
+        [-230000.0, 0.051],
+        [-200000.0, 0.1067],
+        [-170000.0, 0.1554],
+        [-140000.0, 0.2001],
+        [-110000.0, 0.2428],
+        [-80000.0, 0.284],
+        [-40000.0, 0.3372],
+        [0.0, 0.39]
+      ],
+      "br_ref": 0.39,
+      "hcb": 252000.0,
+      "hcj": 262000.0,
+      "bhmax": 28000.0,
+      "t_ref_c": 20.0,
+      "alpha_br_per_c": -0.002,
+      "alpha_hcj_per_c": 0.0027,
+      "t_max_c": 250.0,
+      "provenance": "Y30H-1 / C8 / Feroba3 (hard ferrite) — Br/HcB/HcJ/(BH)max and alpha coefficients transcribed from the Eclipse ferrite TDS as recorded in docs/research/materials-bh-data.md §4.1 (read 2026-11-17); interior second-quadrant points RECONSTRUCTED from those published constants (square intrinsic curve), not digitised from a printed curve."
+    }
+  ]
+}

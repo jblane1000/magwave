@@ -151,13 +151,25 @@ def test_validate_never_raises_for_out_of_remit_cases() -> None:
         assert codes == ({EXPECTED_SKIPS[case.name]} if case.name in EXPECTED_SKIPS else set())
 
 
-def test_demag_curve_is_a_warning_not_an_error() -> None:
+def test_demag_curve_is_refused_with_error() -> None:
     case = BY_NAME["cylinder_axis_Bz"]
-    magnet = replace(case.components[0], demag_curve="N42")
-    result = ENGINE.solve(replace(case, components=(magnet,)))
-    assert [p.code for p in result.problems] == ["W_DEMAG_IGNORED"]
-    assert result.engine_version == magpy.__version__
-    assert result.rung == "second-code"
+    magnet = replace(case.components[0], demag_curve="N42-20C")
+    demag_case = replace(case, components=(magnet,))
+    errors = [p for p in ENGINE.validate(demag_case) if p.is_error]
+    assert [p.code for p in errors] == ["E_UNSUPPORTED_DEMAG_CURVE"]
+    msg = errors[0].message.lower()
+    assert "rigidly polarised" in msg
+    assert "second-quadrant" in msg
+    assert "tier 1" in msg
+    assert "fem2d" in msg
+
+    with pytest.raises(EngineError) as excinfo:
+        ENGINE.solve(demag_case)
+    assert [p.code for p in excinfo.value.problems] == ["E_UNSUPPORTED_DEMAG_CURVE"]
+
+    with pytest.raises(EngineError) as sample_exc:
+        ENGINE.sample(demag_case, [(0.0, 0.0, 0.0)])
+    assert [p.code for p in sample_exc.value.problems] == ["E_UNSUPPORTED_DEMAG_CURVE"]
 
 
 def test_mu0_reconciliation_is_the_exact_constant_ratio() -> None:

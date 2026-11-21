@@ -159,7 +159,7 @@ def build_report_payload(
     }
     if result.convergence is not None:
         conv = result.convergence
-        payload["convergence"] = {
+        conv_payload: dict[str, Any] = {
             "elements": int(conv.elements),
             "final_relative_residual": float(conv.final_relative_residual),
             "interface_nodes": int(conv.interface_nodes),
@@ -170,6 +170,17 @@ def build_report_payload(
             "residual_history": [float(val) for val in conv.residual_history],
             "solver": conv.solver,
         }
+        if conv.magnet_operating_points:
+            conv_payload["magnet_operating_points"] = [
+                {
+                    "b_t": float(op.b_t),
+                    "h_a_per_m": float(op.h_a_per_m),
+                    "name": op.name,
+                    "source": op.source,
+                }
+                for op in conv.magnet_operating_points
+            ]
+        payload["convergence"] = conv_payload
     if name_mismatch:
         payload["corpus_name_mismatch"] = True
     if is_corpus:
@@ -207,6 +218,14 @@ def format_report_markdown(payload: Mapping[str, Any]) -> str:
                 f"material_model: {conv['material_model']}",
             ]
         )
+        ops = conv.get("magnet_operating_points")
+        if isinstance(ops, Sequence) and not isinstance(ops, str | bytes):
+            for op in ops:
+                lines.append(
+                    f"magnet_operating_point[{op['name']}]: "
+                    f"H={float(op['h_a_per_m']):.1f} A/m, B={float(op['b_t']):.6f} T "
+                    f"({op['source']})"
+                )
     lines.append("")
     is_corpus = bool(payload["corpus_case"])
     if is_corpus:

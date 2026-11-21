@@ -24,6 +24,7 @@ byte-identical. Unknown keys are rejected at every level.
       "schema": "magwave.case/1",
       "sources": ["<provenance>", ...],
       "tolerance": <relative>                # must equal the tightest expected tolerance
+      [, "temperature_c": <deg C>]           # optional operating temperature (omitted when null or 20.0)
     }
 
     <component> — one of five, discriminated by "type":
@@ -587,6 +588,7 @@ class Case:
     expected: tuple[ExpectedValue, ...]
     tolerance: float | None = None
     manifest: Manifest | None = None
+    temperature_c: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _text(self.name, "case.name"))
@@ -651,6 +653,15 @@ class Case:
                 f"expected Manifest or None, got {type(self.manifest).__name__}",
             )
 
+        if self.temperature_c is not None:
+            temp = _number(self.temperature_c, "case.temperature_c")
+            if temp < -273.15:
+                _fail(
+                    "case.temperature_c",
+                    f"must be >= -273.15 deg C (absolute zero), got {temp!r}",
+                )
+            object.__setattr__(self, "temperature_c", temp)
+
     def to_dict(self) -> dict[str, Any]:
         """Return the case as a JSON-ready dict with keys sorted at every level."""
         payload: dict[str, Any] = {
@@ -665,6 +676,8 @@ class Case:
         }
         if self.manifest is not None:
             payload["manifest"] = self.manifest.to_dict()
+        if self.temperature_c is not None and self.temperature_c != 20.0:
+            payload["temperature_c"] = self.temperature_c
         return _sorted(payload)
 
     @classmethod
@@ -675,7 +688,7 @@ class Case:
             doc,
             "case",
             ("schema", "name", "description", "sources", "components", "probes", "expected"),
-            ("tolerance", "manifest"),
+            ("tolerance", "manifest", "temperature_c"),
         )
         schema = _text(doc["schema"], "case.schema")
         if schema != SCHEMA:
@@ -713,6 +726,7 @@ class Case:
             ),
             tolerance=doc.get("tolerance"),
             manifest=manifest,
+            temperature_c=doc.get("temperature_c"),
         )
 
     def to_json(self, indent: int = 2) -> str:

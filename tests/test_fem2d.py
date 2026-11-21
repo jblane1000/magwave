@@ -338,11 +338,12 @@ def test_accuracy_gate_is_honest() -> None:
         engine.solve(case)
     assert excinfo.value.problems[0].code == "E_ACCURACY_UNREACHABLE"
 
-    # Also verify W_DEMAG_IGNORED is emitted as a warning when solvable.
+    # Also verify a magnet with a demag_curve now solves via nonlinear Newton and reports its
+    # operating point on the second-quadrant curve (no W_DEMAG_IGNORED warning).
     cyl = CORPUS["cylinder_axis_Bz"]
     demag_case = replace(
         cyl,
-        components=(replace(cyl.components[0], demag_curve="N42"),),
+        components=(replace(cyl.components[0], demag_curve="N42-20C"),),
         expected=(
             replace(
                 cyl.expected[0],
@@ -353,7 +354,15 @@ def test_accuracy_gate_is_honest() -> None:
         tolerance=0.05,
     )
     result = Fem2dEngine(element_size=0.05).solve(demag_case)
-    assert [p.code for p in result.problems] == ["W_DEMAG_IGNORED"]
+    assert result.problems == ()
+    assert result.convergence is not None
+    assert result.convergence.iterations >= 2
+    assert len(result.convergence.magnet_operating_points) == 1
+    op = result.convergence.magnet_operating_points[0]
+    assert op.h_a_per_m < 0.0
+    assert 0.0 < op.b_t < 1.315
+    assert "N42-20C" in result.method
+    assert "N42-20C" in result.convergence.material_model
 
 
 def test_engine_protocol_and_registration(capsys: pytest.CaptureFixture[str]) -> None:
@@ -368,7 +377,7 @@ def test_engine_protocol_and_registration(capsys: pytest.CaptureFixture[str]) ->
     assert caps.coil_kinds == frozenset({"solenoid"})
     assert caps.quantities == frozenset({"B"})
     assert caps.force_methods == ()
-    assert caps.engine_version.endswith("+m5.2b")
+    assert caps.engine_version.endswith("+m5.3")
 
     rc = magwave.cli.main(["bench", "--engine", "fem2d", "--report-accuracy"])
     assert rc == 0

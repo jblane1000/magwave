@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
@@ -13,12 +14,20 @@ from ..engines.base import (
     Capabilities,
     ConvergenceInfo,
     EngineError,
+    MagnetOperatingPoint,
     Problem,
     Result,
     Sample,
     raise_on_errors,
 )
-from ..materials import LIBRARY_VERSION, Material, load_library
+from ..materials import (
+    LIBRARY_VERSION,
+    MAGNET_LIBRARY_VERSION,
+    DemagCurve,
+    Material,
+    demag_curve_for,
+    load_library,
+)
 from ..units import MU0
 from .assembly import element_geometry, load_current_density, load_sheet
 from .field import sample_field
@@ -50,9 +59,37 @@ E_UNSUPPORTED_MANIFEST = "E_UNSUPPORTED_MANIFEST"
 E_ACCURACY_UNREACHABLE = "E_ACCURACY_UNREACHABLE"
 E_PROBE_OUTSIDE_DOMAIN = "E_PROBE_OUTSIDE_DOMAIN"
 E_NOT_CONVERGED = "E_NOT_CONVERGED"
-W_DEMAG_IGNORED = "W_DEMAG_IGNORED"
 
 _AXIS_TOL = 1e-12
+
+
+def _effective_temperature_c(case: Case) -> float:
+    return 20.0 if case.temperature_c is None else float(case.temperature_c)
+
+
+def _body_rz_box(component: Magnet | Permeable) -> tuple[float, float, float, float]:
+    rc = math.hypot(component.center[0], component.center[1])
+    zc = component.center[2]
+    rad = component.dims["radius"]
+    if component.kind == "sphere":
+        return max(0.0, rc - rad), rc + rad, zc - rad, zc + rad
+    half_len = 0.5 * component.dims["length"]
+    return max(0.0, rc - rad), rc + rad, zc - half_len, zc + half_len
+
+
+def _magnet_overlaps_body(mag: Magnet, other: Magnet | Permeable) -> bool:
+    """Return ``True`` if an axisymmetric cylinder magnet overlaps ``other`` in ``(r, z)``."""
+    ma0, ma1, za0, za1 = _body_rz_box(mag)
+    if other.kind == "cylinder":
+        ob0, ob1, zb0, zb1 = _body_rz_box(other)
+        return (min(ma1, ob1) - max(ma0, ob0)) > _AXIS_TOL and (
+            min(za1, zb1) - max(za0, zb0)
+        ) > _AXIS_TOL
+    rs = math.hypot(other.center[0], other.center[1])
+    zs = other.center[2]
+    dr = max(ma0 - rs, 0.0, rs - ma1)
+    dz = max(za0 - zs, 0.0, zs - za1)
+    return math.hypot(dr, dz) < (other.dims["radius"] - _AXIS_TOL)
 
 
 def _label(component: Magnet | Coil | Dipole | Permeable | UniformField, index: int) -> str:
@@ -133,6 +170,7 @@ class Fem2dEngine:
         material_model: str = "linear",
         tol: float = DEFAULT_TOL,
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
+        magnet_curves: Mapping[str, DemagCurve] | None = None,
     ) -> None:
         if element_size is not None and (
             not math.isfinite(element_size) or float(element_size) <= 0.0
@@ -173,7 +211,10 @@ class Fem2dEngine:
         self._material_model = material_model
         self._tol = float(tol)
         self._max_iterations = int(max_iterations)
-        self._version = f"{__version__}+m5.2b"
+        self._magnet_curves: dict[str, DemagCurve] = (
+            dict(magnet_curves) if magnet_curves is not None else {}
+        )
+        self._version = f"{__version__}+m5.3"
 
     @property
     def certified_accuracy(self) -> float:
@@ -205,7 +246,9 @@ class Fem2dEngine:
             quantities=frozenset({"B"}),
             force_methods=(),
             engine_version=self._version,
-            materials=frozenset({"air", "linear_permeable", "nonlinear_permeable"}),
+            materials=frozenset(
+                {"air", "linear_permeable", "nonlinear_permeable", "permanent_magnet_demag_curve"}
+            ),
         )
 
     @property
@@ -216,12 +259,21 @@ class Fem2dEngine:
             "scipy.sparse.linalg.spsolve"
         )
 
+    def _resolve_demag_curve(
+        self, grade_name: str, temperature_c: float
+    ) -> tuple[DemagCurve, bool]:
+        if grade_name in self._magnet_curves:
+            return self._magnet_curves[grade_name].at_temperature(temperature_c), True
+        return demag_curve_for(grade_name, temperature_c), False
+
     def validate(self, case: Case) -> list[Problem]:
-        """Validate ``case`` against Tier 1 stage 2 capabilities, materials and accuracy."""
+        """Validate ``case`` against Tier 1 capabilities, materials and accuracy."""
         problems: list[Problem] = []
+        temp_c = _effective_temperature_c(case)
 
         # 1. Components first.
         permeable_bodies: list[Permeable] = []
+        demag_magnets: list[Magnet] = []
         for index, component in enumerate(case.components):
             label = _label(component, index)
             if isinstance(component, UniformField):
@@ -324,14 +376,18 @@ class Fem2dEngine:
                         )
                     )
                 if component.demag_curve is not None:
-                    problems.append(
-                        Problem(
-                            W_DEMAG_IGNORED,
-                            f"{case.name}: {label} names demag curve {component.demag_curve!r}; "
-                            "fem2d stage 1 treats permanent magnets as rigidly polarised",
-                            "warning",
+                    try:
+                        self._resolve_demag_curve(component.demag_curve, temp_c)
+                    except ValueError as exc:
+                        problems.append(
+                            Problem(
+                                E_UNSUPPORTED_MATERIAL,
+                                f"{case.name}: {label} magnet demag curve error: {exc}",
+                                "error",
+                            )
                         )
-                    )
+                    else:
+                        demag_magnets.append(component)
                 continue
 
             if isinstance(component, Coil):
@@ -377,6 +433,28 @@ class Fem2dEngine:
                     Problem(
                         E_UNSUPPORTED_MATERIAL,
                         f"{case.name}: permeable bodies overlap ({', '.join(overlaps)})",
+                        "error",
+                    )
+                )
+
+        if demag_magnets:
+            mag_overlaps: list[str] = []
+            for idx_a, mag_a in enumerate(demag_magnets):
+                for mag_b in demag_magnets[idx_a + 1 :]:
+                    if _magnet_overlaps_body(mag_a, mag_b):
+                        name_a = mag_a.name or f"#{case.components.index(mag_a)}"
+                        name_b = mag_b.name or f"#{case.components.index(mag_b)}"
+                        mag_overlaps.append(f"{name_a} and {name_b}")
+                for body in permeable_bodies:
+                    if _magnet_overlaps_body(mag_a, body):
+                        name_a = mag_a.name or f"#{case.components.index(mag_a)}"
+                        name_b = body.name or f"#{case.components.index(body)}"
+                        mag_overlaps.append(f"{name_a} and {name_b}")
+            if mag_overlaps:
+                problems.append(
+                    Problem(
+                        E_UNSUPPORTED_MATERIAL,
+                        f"{case.name}: demag magnet overlaps another body ({', '.join(mag_overlaps)})",
                         "error",
                     )
                 )
@@ -585,7 +663,14 @@ class Fem2dEngine:
                 length = component.dims["length"]
                 z1 = component.center[2] - 0.5 * length
                 z2 = component.center[2] + 0.5 * length
-                k_phi = component.br[2] / MU0
+                if component.demag_curve is None:
+                    k_phi = component.br[2] / MU0
+                else:
+                    curve, _ = self._resolve_demag_curve(
+                        component.demag_curve, _effective_temperature_c(case)
+                    )
+                    sign = -1.0 if component.br[2] < 0.0 else 1.0
+                    k_phi = sign * curve.br() / MU0
                 load += load_sheet(mesh, r_out, (z1, z2), k_phi)
 
         return mesh, load, probes_rz
@@ -648,16 +733,160 @@ class Fem2dEngine:
         vals[r_vals <= _AXIS_TOL] = 0.0
         return constrained, vals, uniform
 
+    def _magnet_demag_assignments(
+        self,
+        mesh: Mesh,
+        case: Case,
+        region_ids: np.ndarray,
+    ) -> list[tuple[Magnet, int, np.ndarray, DemagCurve, float, bool]]:
+        """Return demag-magnet assignments and update ``region_ids`` for interface counting."""
+        if not any(isinstance(c, Magnet) and c.demag_curve is not None for c in case.components):
+            return []
+
+        _, r_c, z_c, _, _ = element_geometry(mesh)
+        temp_c = _effective_temperature_c(case)
+        next_id = int(np.max(region_ids)) + 1 if region_ids.size else 1
+        demag_assignments: list[tuple[Magnet, int, np.ndarray, DemagCurve, float, bool]] = []
+        for comp_idx, component in enumerate(case.components):
+            if isinstance(component, Magnet) and component.demag_curve is not None:
+                curve, is_custom = self._resolve_demag_curve(component.demag_curve, temp_c)
+                r_out = component.dims["radius"]
+                half_len = 0.5 * component.dims["length"]
+                zc = component.center[2]
+                mask = (r_c <= r_out) & (np.abs(z_c - zc) <= half_len)
+                sign = -1.0 if component.br[2] < 0.0 else 1.0
+                region_ids[mask] = next_id
+                next_id += 1
+                demag_assignments.append((component, comp_idx, mask, curve, sign, is_custom))
+        return demag_assignments
+
     def solve_with_report(self, case: Case) -> tuple[Result, SolveReport]:
         """Validate and solve ``case``, returning ``(Result, SolveReport)``."""
         warnings = raise_on_errors(ENGINE_ID, self.validate(case))
         mesh, load, probes_rz = self._build_mesh_and_load(case)
         assignments, region_ids = self._permeable_assignments(mesh, case)
+        demag_assignments = self._magnet_demag_assignments(mesh, case, region_ids)
         interface_nodes = count_interface_nodes(mesh, region_ids)
         constrained, values, uniform = self._dirichlet_bc(mesh, case)
 
-        use_nonlinear = self._material_model == "nonlinear" and bool(assignments)
-        if use_nonlinear:
+        if demag_assignments:
+            temp_c = _effective_temperature_c(case)
+            if assignments and self._material_model == "nonlinear":
+                element_curves = [(mask, mat.bh_curve()) for _, mask, mat, _ in assignments]
+                base_nu: np.ndarray | None = None
+                steel_notes = [
+                    f"{mat.name} nonlinear B-H (PCHIP)"
+                    + (f", Ms={mat.saturation_B:g} T" if mat.saturation_B is not None else "")
+                    for _, _, mat, _ in assignments
+                ]
+            elif assignments:
+                element_curves = []
+                base_nu = np.full(mesh.elements.shape[0], 1.0 / MU0, dtype=np.float64)
+                steel_notes = []
+                for _, mask, mat, prov_line in assignments:
+                    base_nu[mask] = mat.nu()
+                    steel_notes.append(prov_line)
+            else:
+                element_curves = []
+                base_nu = None
+                steel_notes = []
+
+            magnet_regions = [
+                (mask, curve, sign) if sign < 0.0 else (mask, curve)
+                for _, _, mask, curve, sign, _ in demag_assignments
+            ]
+            try:
+                a_phi, report, history, _ = solve_axisymmetric_nonlinear(
+                    mesh,
+                    load,
+                    element_curves,
+                    base_nu=base_nu,
+                    constrained=constrained,
+                    values=values,
+                    tol=self._tol,
+                    max_iterations=self._max_iterations,
+                    magnet_regions=magnet_regions,
+                )
+            except NonlinearConvergenceError as exc:
+                raise EngineError(
+                    ENGINE_ID,
+                    [
+                        Problem(
+                            E_NOT_CONVERGED,
+                            f"{case.name}: Newton solver did not converge after {exc.iterations} "
+                            f"iteration(s) (cap={exc.max_iterations}, "
+                            f"final_relative_residual={exc.final_relative_residual:.6e}, "
+                            f"reason={exc.reason}); no result produced",
+                            "error",
+                        )
+                    ],
+                ) from exc
+
+            op_points: list[MagnetOperatingPoint] = []
+            mag_notes: list[str] = []
+            for component, comp_idx, _, curve, sign, is_custom in demag_assignments:
+                bz_centroid = float(
+                    sample_field(
+                        mesh, a_phi, np.array([[0.0, component.center[2]]], dtype=np.float64)
+                    )[0, 1]
+                )
+                b_op = sign * bz_centroid
+                h_op = float(curve.h_of_b(b_op))
+                mag_label = component.name or f"#{comp_idx}"
+                lib_tag = (
+                    "custom curve" if is_custom else f"magwave.magnets v{MAGNET_LIBRARY_VERSION}"
+                )
+                op_source = f"{curve.name} @ {temp_c:g} C (Br={curve.br():.6g} T, {lib_tag})"
+                op_points.append(
+                    MagnetOperatingPoint(
+                        name=mag_label,
+                        h_a_per_m=h_op,
+                        b_t=b_op,
+                        source=op_source,
+                    )
+                )
+                mag_notes.append(
+                    f"{mag_label}: {curve.name} at T={temp_c:g} C, "
+                    f"Br(T)={curve.br():.6g} T, op=(H={h_op:.1f} A/m, B={b_op:.6f} T)"
+                )
+
+            all_notes = mag_notes + steel_notes
+            material_desc = "; ".join(all_notes)
+            relaxation_desc = (
+                f"Armijo backtracking, alpha0={ARMIJO_ALPHA0:g}, rho={ARMIJO_RHO:g}, "
+                f"c={ARMIJO_C:g}, max {ARMIJO_MAX_HALVINGS} halvings"
+            )
+            solver_desc = "Newton + Armijo backtracking, scipy.sparse.linalg.spsolve"
+            convergence = ConvergenceInfo(
+                iterations=report.iterations,
+                final_relative_residual=float(report.relative_residual),
+                residual_history=tuple(float(val) for val in history),
+                nodes=report.mesh.nodes,
+                elements=report.mesh.elements,
+                interface_nodes=interface_nodes,
+                solver=solver_desc,
+                relaxation=relaxation_desc,
+                material_model=material_desc,
+                magnet_operating_points=tuple(op_points),
+            )
+            bc_desc = (
+                f"applied field H0 = {uniform.h0:g} A/m via Dirichlet A = MU0*H0*r/2 "
+                f"at {self._far_field_factor:g}x far field (A=0 on axis)"
+                if uniform is not None
+                else f"Dirichlet A=0 on axis and at {self._far_field_factor:g}x far field"
+            )
+            lib_sources = [f"magwave.magnets v{MAGNET_LIBRARY_VERSION}"]
+            if steel_notes:
+                lib_sources.append(f"magwave.materials v{LIBRARY_VERSION}")
+            method_str = ", ".join(
+                [
+                    "axisymmetric A_phi FEM, linear triangles, centroid quadrature",
+                    f"second-quadrant PM demag ({'; '.join(lib_sources)}: {material_desc})",
+                    bc_desc,
+                    solver_desc,
+                ]
+            )
+        elif self._material_model == "nonlinear" and bool(assignments):
             element_curves = [(mask, mat.bh_curve()) for _, mask, mat, _ in assignments]
             nl_notes = [
                 f"{mat.name} nonlinear B-H (PCHIP)"

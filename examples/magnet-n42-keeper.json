@@ -1,0 +1,83 @@
+{
+  "components": [
+    {
+      "br": [
+        0.0,
+        0.0,
+        1.315
+      ],
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "demag_curve": "N42-20C",
+      "dims": {
+        "length": 0.02,
+        "radius": 0.01
+      },
+      "kind": "cylinder",
+      "name": "n42_magnet",
+      "type": "magnet"
+    },
+    {
+      "center": [
+        0.0,
+        0.0,
+        0.013
+      ],
+      "dims": {
+        "length": 0.006,
+        "radius": 0.01
+      },
+      "kind": "cylinder",
+      "material": "steel-team20",
+      "name": "keeper_top",
+      "type": "permeable"
+    },
+    {
+      "center": [
+        0.0,
+        0.0,
+        -0.013
+      ],
+      "dims": {
+        "length": 0.006,
+        "radius": 0.01
+      },
+      "kind": "cylinder",
+      "material": "steel-team20",
+      "name": "keeper_bottom",
+      "type": "permeable"
+    }
+  ],
+  "description": "Sintered NdFeB N42 cylinder magnet (R = 10 mm, L = 20 mm) with two coaxial TEAM 20 steel pole-face keepers (R = 10 mm, L = 6 mm at z = +-13 mm) at 20 C (M5.3 FR-020).",
+  "expected": [
+    {
+      "check": "nonlinear_pm_demag_fem",
+      "quantity": "Bz",
+      "source": "REGRESSION SNAPSHOT: Tier 1 Fem2dEngine output at default mesh h = 0.5 mm (N42-20C demag curve + nonlinear steel-team20 keepers); not a physical reference",
+      "tolerance": 0.03,
+      "unit": "T",
+      "value": 1.0655571548165717
+    }
+  ],
+  "name": "magnet_n42_keeper",
+  "probes": [
+    {
+      "component": "z",
+      "point": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "quantity": "B"
+    }
+  ],
+  "schema": "magwave.case/1",
+  "sources": [
+    "Arnold N42 grade datasheet values in docs/research/materials-bh-data.md §4.1 (magwave.magnets v1 N42-20C)",
+    "Compumag TEAM 20 steel B-H table (magwave.materials v1 steel-team20)"
+  ],
+  "tolerance": 0.03
+}

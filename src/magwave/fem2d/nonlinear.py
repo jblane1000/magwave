@@ -50,6 +50,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
+from ..materials.magnets import DemagCurve
 from ..materials.nonlinear import BhCurve
 from ..units import MU0
 from .assembly import element_geometric_stiffness, element_geometry
@@ -95,6 +96,7 @@ class _NonlinearWorkspace:
     g_elem: np.ndarray
     br_coef: np.ndarray
     bz_coef: np.ndarray
+    w_elem: np.ndarray
     rows: np.ndarray
     cols: np.ndarray
     is_constrained: np.ndarray
@@ -104,6 +106,7 @@ class _NonlinearWorkspace:
     f_vec: np.ndarray
     base_nu: np.ndarray
     element_curves: tuple[tuple[np.ndarray, BhCurve], ...]
+    magnet_regions: tuple[tuple[np.ndarray, DemagCurve, float], ...]
 
 
 def count_interface_nodes(mesh: Mesh, region_ids: np.ndarray) -> int:
@@ -130,6 +133,8 @@ def _build_workspace(
     base_nu: np.ndarray | None = None,
     constrained: np.ndarray | Sequence[int] | None = None,
     values: Mapping[int, float] | np.ndarray | Sequence[float] | None = None,
+    magnet_regions: Sequence[tuple[np.ndarray, DemagCurve] | tuple[np.ndarray, DemagCurve, float]]
+    | None = None,
 ) -> _NonlinearWorkspace:
     n_nodes = int(mesh.nodes.shape[0])
     m_elems = int(mesh.elements.shape[0])
@@ -149,11 +154,36 @@ def _build_workspace(
             raise ValueError("base_nu entries must be positive and finite")
 
     parsed_curves: list[tuple[np.ndarray, BhCurve]] = []
+    occupied_mask = np.zeros(m_elems, dtype=bool)
     for raw_mask, curve in element_curves:
         mask = np.asarray(raw_mask, dtype=bool)
         if mask.shape != (m_elems,):
             raise ValueError(f"element mask must have shape ({m_elems},), got {mask.shape}")
         parsed_curves.append((mask, curve))
+        occupied_mask |= mask
+
+    parsed_magnets: list[tuple[np.ndarray, DemagCurve, float]] = []
+    if magnet_regions:
+        for item in magnet_regions:
+            if len(item) == 2:
+                raw_mask, mag_curve = item
+                sign_f = 1.0
+            elif len(item) == 3:
+                raw_mask, mag_curve, raw_sign = item
+                sign_f = float(raw_sign)
+                if sign_f not in (-1.0, 1.0):
+                    raise ValueError(f"magnet region sign must be +1 or -1, got {raw_sign!r}")
+            else:
+                raise ValueError(
+                    "magnet_regions entries must be (mask, DemagCurve) or (mask, DemagCurve, sign)"
+                )
+            mask = np.asarray(raw_mask, dtype=bool)
+            if mask.shape != (m_elems,):
+                raise ValueError(f"magnet mask must have shape ({m_elems},), got {mask.shape}")
+            if np.any(occupied_mask & mask):
+                raise ValueError("magnet_regions mask overlaps an existing nonlinear region")
+            occupied_mask |= mask
+            parsed_magnets.append((mask, mag_curve, sign_f))
 
     if constrained is None:
         raw_constrained = dirichlet_nodes(mesh)
@@ -177,10 +207,11 @@ def _build_workspace(
             n_nodes, raw_constrained, constrained_idx, is_constrained, values
         )
 
-    _, r_c, _, b_grad, c_grad = element_geometry(mesh)
+    area, r_c, _, b_grad, c_grad = element_geometry(mesh)
     g_elem = element_geometric_stiffness(mesh)
     br_coef = -c_grad
     bz_coef = b_grad + 1.0 / (3.0 * r_c[:, None])
+    w_elem = area * r_c
 
     rows = np.repeat(mesh.elements, 3, axis=1).ravel()
     cols = np.tile(mesh.elements, (1, 3)).ravel()
@@ -194,6 +225,7 @@ def _build_workspace(
         g_elem=g_elem,
         br_coef=br_coef,
         bz_coef=bz_coef,
+        w_elem=w_elem,
         rows=rows,
         cols=cols,
         is_constrained=is_constrained,
@@ -203,12 +235,22 @@ def _build_workspace(
         f_vec=f_vec,
         base_nu=base_nu_arr,
         element_curves=tuple(parsed_curves),
+        magnet_regions=tuple(parsed_magnets),
     )
 
 
 def _evaluate_residual(
     ws: _NonlinearWorkspace, a_phi: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray | None,
+    np.ndarray,
+]:
     ae = a_phi[ws.elems]
     b_r = np.sum(ws.br_coef * ae, axis=1)
     b_z = np.sum(ws.bz_coef * ae, axis=1)
@@ -222,11 +264,36 @@ def _evaluate_residual(
             nu[mask] = nu_s
             dnu[mask] = dnu_s
 
+    if not ws.magnet_regions:
+        ga = np.einsum("eij,ej->ei", ws.g_elem, ae)
+        r_vec = -ws.f_vec.copy()
+        np.add.at(r_vec, ws.elems, nu[:, None] * ga)
+        r_vec[ws.is_constrained] = a_phi[ws.is_constrained] - ws.g_vec[ws.is_constrained]
+        return r_vec, b_mag, b_r, b_z, nu, dnu, None, ga
+
+    dc = np.zeros(ws.m_elems, dtype=np.float64)
+    f_off_total = np.zeros(ws.n_nodes, dtype=np.float64)
+    has_nonzero_offset = False
+    for mask, mag_curve, sign in ws.magnet_regions:
+        if np.any(mask):
+            s_m, ds_m, c_m, dc_m = mag_curve.slope_and_offset(b_mag[mask])
+            nu[mask] = s_m
+            dnu[mask] = ds_m
+            dc[mask] = sign * dc_m
+            c0 = -mag_curve.br() / MU0
+            offsets = sign * (c0 - c_m)
+            if not np.all(offsets == 0.0):
+                has_nonzero_offset = True
+                f_elem = (offsets * ws.w_elem[mask])[:, None] * ws.bz_coef[mask]
+                np.add.at(f_off_total, ws.elems[mask], f_elem)
+
     ga = np.einsum("eij,ej->ei", ws.g_elem, ae)
     r_vec = -ws.f_vec.copy()
+    if has_nonzero_offset:
+        r_vec -= f_off_total
     np.add.at(r_vec, ws.elems, nu[:, None] * ga)
     r_vec[ws.is_constrained] = a_phi[ws.is_constrained] - ws.g_vec[ws.is_constrained]
-    return r_vec, b_mag, b_r, b_z, nu, dnu, ga
+    return r_vec, b_mag, b_r, b_z, nu, dnu, dc, ga
 
 
 def _assemble_jacobian(
@@ -237,6 +304,7 @@ def _assemble_jacobian(
     nu: np.ndarray,
     dnu: np.ndarray,
     ga: np.ndarray,
+    dc: np.ndarray | None = None,
 ) -> sp.csr_matrix:
     nonzero = b_mag > _B_ZERO_TOL
     safe_b = np.where(nonzero, b_mag, 1.0)
@@ -248,6 +316,14 @@ def _assemble_jacobian(
     j_elem = nu[:, None, None] * ws.g_elem + (
         dnu[:, None, None] * ga[:, :, None] * db_da[:, None, :]
     )
+    if dc is not None:
+        for mask, _, _ in ws.magnet_regions:
+            if np.any(mask):
+                j_elem[mask] += (
+                    (ws.w_elem[mask] * dc[mask])[:, None, None]
+                    * ws.bz_coef[mask, :, None]
+                    * db_da[mask, None, :]
+                )
     j_mat = sp.csr_matrix((j_elem.ravel(), (ws.rows, ws.cols)), shape=(ws.n_nodes, ws.n_nodes))
     j_bc = (ws.keep_diag @ j_mat @ ws.keep_diag) + ws.pin_diag
     j_bc.eliminate_zeros()
@@ -263,6 +339,8 @@ def assemble_nonlinear_system(
     base_nu: np.ndarray | None = None,
     constrained: np.ndarray | Sequence[int] | None = None,
     values: Mapping[int, float] | np.ndarray | Sequence[float] | None = None,
+    magnet_regions: Sequence[tuple[np.ndarray, DemagCurve] | tuple[np.ndarray, DemagCurve, float]]
+    | None = None,
 ) -> tuple[np.ndarray, sp.csr_matrix, np.ndarray, np.ndarray]:
     """Assemble ``(residual, jacobian_bc, b_mag, nu_elem)`` at nodal potential ``a_phi``."""
     a_vec = np.asarray(a_phi, dtype=np.float64)
@@ -276,9 +354,10 @@ def assemble_nonlinear_system(
         base_nu=base_nu,
         constrained=constrained,
         values=values,
+        magnet_regions=magnet_regions,
     )
-    r_vec, b_mag, b_r, b_z, nu, dnu, ga = _evaluate_residual(ws, a_vec)
-    j_bc = _assemble_jacobian(ws, b_mag, b_r, b_z, nu, dnu, ga)
+    r_vec, b_mag, b_r, b_z, nu, dnu, dc, ga = _evaluate_residual(ws, a_vec)
+    j_bc = _assemble_jacobian(ws, b_mag, b_r, b_z, nu, dnu, ga, dc=dc)
     return r_vec, j_bc, b_mag, nu
 
 
@@ -292,6 +371,8 @@ def solve_axisymmetric_nonlinear(
     values: Mapping[int, float] | np.ndarray | Sequence[float] | None = None,
     tol: float = DEFAULT_TOL,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    magnet_regions: Sequence[tuple[np.ndarray, DemagCurve] | tuple[np.ndarray, DemagCurve, float]]
+    | None = None,
 ) -> tuple[np.ndarray, SolveReport, tuple[float, ...], np.ndarray]:
     """Solve nonlinear axisymmetric ``K(nu(|B|)) A = f`` with Newton + Armijo backtracking.
 
@@ -321,11 +402,12 @@ def solve_axisymmetric_nonlinear(
         base_nu=base_nu,
         constrained=constrained,
         values=values,
+        magnet_regions=magnet_regions,
     )
     a_phi = ws.g_vec.copy()
 
     t0 = time.perf_counter()
-    r_curr, b_mag, b_r, b_z, nu_curr, dnu_curr, ga_curr = _evaluate_residual(ws, a_phi)
+    r_curr, b_mag, b_r, b_z, nu_curr, dnu_curr, dc_curr, ga_curr = _evaluate_residual(ws, a_phi)
     r_curr_norm = float(np.linalg.norm(r_curr))
 
     f_free = ws.f_vec.copy()
@@ -350,7 +432,7 @@ def solve_axisymmetric_nonlinear(
 
     history: list[float] = []
     for iteration in range(1, max_iterations + 1):
-        j_bc = _assemble_jacobian(ws, b_mag, b_r, b_z, nu_curr, dnu_curr, ga_curr)
+        j_bc = _assemble_jacobian(ws, b_mag, b_r, b_z, nu_curr, dnu_curr, ga_curr, dc=dc_curr)
         d_a = np.asarray(spla.spsolve(j_bc.tocsc(), -r_curr), dtype=np.float64)
         d_a[ws.is_constrained] = 0.0
         if not np.all(np.isfinite(d_a)):
@@ -369,17 +451,25 @@ def solve_axisymmetric_nonlinear(
         for _ in range(ARMIJO_MAX_HALVINGS + 1):
             a_trial = a_phi + alpha * d_a
             a_trial[ws.is_constrained] = ws.g_vec[ws.is_constrained]
-            r_t, bm_t, br_t, bz_t, nu_t, dnu_t, ga_t = _evaluate_residual(ws, a_trial)
+            if ws.magnet_regions:
+                try:
+                    r_t, bm_t, br_t, bz_t, nu_t, dnu_t, dc_t, ga_t = _evaluate_residual(ws, a_trial)
+                except ValueError:
+                    alpha *= ARMIJO_RHO
+                    continue
+            else:
+                r_t, bm_t, br_t, bz_t, nu_t, dnu_t, dc_t, ga_t = _evaluate_residual(ws, a_trial)
             r_t_norm = float(np.linalg.norm(r_t))
             if r_t_norm <= (1.0 - ARMIJO_C * alpha) * r_curr_norm:
                 a_phi = a_trial
-                r_curr, b_mag, b_r, b_z, nu_curr, dnu_curr, ga_curr = (
+                r_curr, b_mag, b_r, b_z, nu_curr, dnu_curr, dc_curr, ga_curr = (
                     r_t,
                     bm_t,
                     br_t,
                     bz_t,
                     nu_t,
                     dnu_t,
+                    dc_t,
                     ga_t,
                 )
                 r_curr_norm = r_t_norm
