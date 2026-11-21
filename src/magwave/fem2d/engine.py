@@ -234,7 +234,12 @@ class Fem2dEngine:
         self._magnet_curves: dict[str, DemagCurve] = (
             dict(magnet_curves) if magnet_curves is not None else {}
         )
-        self._version = f"{__version__}+m5.4"
+        self._version = f"{__version__}+m5.4b"
+
+    @property
+    def element_size(self) -> float | None:
+        """Requested uniform refinement element size in metres, or ``None`` for auto-sizing."""
+        return self._element_size
 
     @property
     def certified_accuracy(self) -> float:

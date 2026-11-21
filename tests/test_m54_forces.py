@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 import struct
@@ -38,12 +39,16 @@ from magwave.fem2d import (
     E_FORCE_TARGET_UNKNOWN,
     E_FORCE_UNSUPPORTED_CASE,
     E_TORQUE_NOT_MEANINGFUL,
+    DeltaStep,
+    DeltaStudyResult,
     ForceError,
+    coenergy_delta_study,
     coenergy_force,
     magnetic_coenergy,
     maxwell_force,
     torque,
 )
+from magwave.fem2d.force import _analyze_delta_ladder
 from magwave.materials import load_library
 from magwave.units import MU0
 
@@ -123,7 +128,15 @@ def test_gate1_neumann_reference_and_two_coaxial_loops() -> None:
 
 
 def test_gate2_solenoid_inductance_from_coenergy() -> None:
-    """Gate 2: L_fem = 2 W' / I^2 agrees with Nagaoka-corrected L_ideal within 0.5%."""
+    """Gate 2: Nagaoka-corrected solenoid inductance agreement within 0.5%.
+
+    Framing: ``raw_dev`` compares ``L_fem = 2 W' / I^2`` against the elementary ideal
+    long-solenoid formula ``L_ideal = mu_0 * N^2 * pi * R^2 / l`` and therefore measures the
+    error of the ideal formula (which omits finite-length end effects at ``l/D = 10``,
+    ``l/R = 20``; the correction belongs to the reference, not the FEM). ``corr_dev`` compares
+    ``L_fem`` against the exact Nagaoka/Lorenz thin-sheet reference ``L_ref = K_N * L_ideal``
+    (basis: ``K_N(l/D=10) = 0.95880712``).
+    """
     case = build_solenoid_case()
     eng = Fem2dEngine(element_size=5.0e-4)
     w_co, _, _ = magnetic_coenergy(case, eng)
@@ -436,3 +449,136 @@ def test_gate3_coenergy_finite_difference_step_sensitivity() -> None:
     assert step_diff <= 0.02
     assert abs(f_h - f_m) / max(abs(f_h), abs(f_m)) <= 0.02
     assert abs(f_h2 - f_m) / max(abs(f_h2), abs(f_m)) <= 0.02
+
+
+@pytest.fixture(scope="module")
+def _gate3_delta_study_and_maxwell() -> tuple[DeltaStudyResult, float, float, float]:
+    """Run the Gate 3 steel delta-convergence study and Maxwell reference once per module."""
+    h = 5.0e-4
+    steel_case = build_magnet_plate_case(0.0)
+    z_before = [float(comp.center[2]) for comp in steel_case.components]
+    eng = _steel_plate_engine(h)
+
+    res_m = maxwell_force(steel_case, eng, target="magnet", contour=GATE3_CONTOUR)
+    study = coenergy_delta_study(steel_case, eng, target="magnet")
+
+    z_after = [float(comp.center[2]) for comp in steel_case.components]
+    assert z_after == z_before
+    return study, float(res_m.force_n[2]), h, z_before[0]
+
+
+def test_coenergy_delta_study_synthetic_order_and_asymptotic() -> None:
+    """Synthetic O(delta^2) ladder verifies positive order p=2 and asymptotic=True; non-monotonic gives False."""
+    h = 5.0e-4
+    quad_steps = tuple(
+        DeltaStep(
+            label=label,
+            delta_m=delta_m,
+            delta_over_h=delta_m / h,
+            force_n=100.0 + 10.0 * (delta_m / h) ** 2,
+            mesh_nodes=1000,
+            mesh_elements=1800,
+        )
+        for label, delta_m in (("h/8", h / 8.0), ("h/4", h / 4.0), ("h/2", h / 2.0), ("h", h))
+    )
+    quad = _analyze_delta_ladder("magnet", h, quad_steps, ())
+    assert quad.monotonic is True
+    assert quad.asymptotic is True
+    assert quad.p_fit == pytest.approx(2.0, rel=1e-9, abs=1e-9)
+    for p_val in quad.p_per_pair:
+        assert p_val == pytest.approx(2.0, rel=1e-9, abs=1e-9)
+    assert quad.f_extrapolated_n == pytest.approx(100.0, rel=1e-9, abs=1e-9)
+    assert quad.step_uncertainty_n == pytest.approx(
+        abs(quad_steps[0].force_n - 100.0), rel=1e-9, abs=1e-9
+    )
+
+    non_mono_steps = tuple(
+        DeltaStep(
+            label=label,
+            delta_m=delta_m,
+            delta_over_h=delta_m / h,
+            force_n=force_n,
+            mesh_nodes=1000,
+            mesh_elements=1800,
+        )
+        for label, delta_m, force_n in (
+            ("h/8", h / 8.0, 100.0),
+            ("h/4", h / 4.0, 101.0),
+            ("h/2", h / 2.0, 100.5),
+            ("h", h, 102.0),
+        )
+    )
+    non_mono = _analyze_delta_ladder("magnet", h, non_mono_steps, ())
+    assert non_mono.monotonic is False
+    assert non_mono.asymptotic is False
+    assert None in non_mono.p_per_pair
+    assert any("not in its asymptotic range" in note for note in non_mono.notes)
+
+
+def test_coenergy_delta_study_gate3_contract_determinism_and_refusal(
+    _gate3_delta_study_and_maxwell: tuple[DeltaStudyResult, float, float, float],
+) -> None:
+    """Gate 3 delta study satisfies ladder, uncertainty, mesh, determinism, and clearance refusal contracts."""
+    study, _, h, _ = _gate3_delta_study_and_maxwell
+    assert len(study.steps) >= 4
+    deltas = [step.delta_m for step in study.steps]
+    assert deltas == sorted(deltas)
+    assert deltas[-1] / deltas[0] >= 8.0 - 1e-12
+
+    forces = [step.force_n for step in study.steps]
+    assert all(math.isfinite(f) and f > 0.0 for f in forces)
+    assert all(step.mesh_nodes > 0 and step.mesh_elements > 0 for step in study.steps)
+    assert len({step.mesh_nodes for step in study.steps}) >= 2
+
+    assert isinstance(study.asymptotic, bool)
+    if study.p_fit is None:
+        assert len(study.notes) > 0
+    else:
+        assert math.isfinite(study.p_fit)
+    for p_val in study.p_per_pair:
+        if p_val is not None:
+            assert math.isfinite(p_val)
+
+    assert study.f_extrapolated_n is not None
+    assert math.isfinite(study.f_extrapolated_n)
+    assert 0.9 * min(forces) <= study.f_extrapolated_n <= 1.1 * max(forces)
+    assert study.step_uncertainty_n > 0.0
+    assert study.peak_to_peak_n > 0.0
+
+    # Determinism across consecutive runs
+    steel_case = build_magnet_plate_case(0.0)
+    eng = _steel_plate_engine(h)
+    study_repeat = coenergy_delta_study(steel_case, eng, target="magnet")
+    assert repr(study_repeat) == repr(study)
+
+    # Clearance refusal: delta = 2h = 1.0e-3 m equals the 1 mm axial gap
+    with pytest.raises(ForceError) as ref_exc:
+        coenergy_force(steel_case, eng, target="magnet", delta=2.0 * h)
+    assert ref_exc.value.code == E_FORCE_UNSUPPORTED_CASE
+
+    refused_study = coenergy_delta_study(
+        steel_case,
+        eng,
+        target="magnet",
+        deltas=(0.5 * h, 2.0 * h),
+    )
+    assert len(refused_study.steps) == 1
+    assert math.isclose(refused_study.steps[0].delta_m, 0.5 * h, rel_tol=1e-12)
+    assert len(refused_study.refused) == 1
+    assert math.isclose(refused_study.refused[0][0], 2.0 * h, rel_tol=1e-12)
+    assert E_FORCE_UNSUPPORTED_CASE in refused_study.refused[0][1]
+
+
+def test_coenergy_delta_study_gate3_agreement_gate(
+    _gate3_delta_study_and_maxwell: tuple[DeltaStudyResult, float, float, float],
+) -> None:
+    """Gate 3 unchanged 2% Maxwell-vs-coenergy agreement evaluated on delta-extrapolated coenergy."""
+    study, f_maxwell, _, _ = _gate3_delta_study_and_maxwell
+    assert study.f_extrapolated_n is not None
+    f_extrap = study.f_extrapolated_n
+    agree = abs(f_maxwell - f_extrap) / max(abs(f_maxwell), abs(f_extrap))
+    assert agree <= 0.02, (
+        f"Gate 3 Maxwell ({f_maxwell:.5f} N) vs delta-extrapolated coenergy "
+        f"({f_extrap:.5f} N +/- {study.step_uncertainty_n:.5f} N step band) disagreement "
+        f"is {100.0 * agree:.4f}% > 2.0000%"
+    )

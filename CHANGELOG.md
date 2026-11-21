@@ -6,6 +6,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **M5.4b — Coenergy delta-convergence study & Gate 2 framing (`+m5.4b`)**:
+  added `coenergy_delta_study`, `DeltaStep`, and `DeltaStudyResult` in `magwave.fem2d.force`
+  (exported from `magwave.fem2d`) plus read-only `Fem2dEngine.element_size`; bumped
+  `Fem2dEngine` version suffix to `+m5.4b`. Wired `tools/force_report.py` Gate 3 to report the
+  observed-order delta-extrapolated coenergy force (`100.20786 N`, `step_uncertainty = 1.04757 N`
+  / `1.045%`, combined band RSS `1.355%` / linear sum `1.908%`, non-asymptotic `p_fit = +0.50410`
+  driven by sub-`h` remeshing `12 126 -> 12 220` nodes), recomputing Maxwell-vs-coenergy agreement
+  at `2.0291%` (`FAIL` against the unchanged `2%` gate) while retaining single-step `delta = h`
+  (`102.81233 N`, `0.5146%`) as superseded history. Reordered Gate 2 output, ADR 0009, and test
+  documentation so the finite-length end-effect explanation precedes the table (`raw dev% = -4.151%`
+  ideal-formula error vs `corrected dev% = -0.0327%` FEM-vs-Nagaoka/Lorenz reference `K_N = 0.95880712`).
+
+### Fixed
+
+- **Gate 3 step-convergence transparency & Gate 2 misleading lead**: prevented reporting a
+  single hand-picked finite-difference step (`delta = h`) or a non-asymptotic remeshing ladder as
+  a converged limit, and fixed Gate 2 presentation so the elementary formula's end-effect error is
+  not misread as solver error.
+
 ### Added
 
 - **M5.4 — Tier 1 forces (Maxwell stress + coenergy), torque refusal, Tier 0 permeable force gate**:

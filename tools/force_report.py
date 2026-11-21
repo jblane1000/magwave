@@ -31,6 +31,7 @@ from tools.elmer_permeable import (  # noqa: E402
 from magwave.cases import Case, Coil, ExpectedValue, Probe  # noqa: E402
 from magwave.fem2d.engine import Fem2dEngine  # noqa: E402
 from magwave.fem2d.force import (  # noqa: E402
+    coenergy_delta_study,
     coenergy_force,
     magnetic_coenergy,
     maxwell_force,
@@ -239,7 +240,7 @@ def run_report(*, fast: bool = False, skip_elmer: bool = False) -> dict[str, obj
     corr_dev_pct = 100.0 * (l_fem - l_nagaoka) / l_nagaoka
     solenoid_data = {
         "rung": "coenergy",
-        "reference_rung": "closed-form (Neumann)",
+        "reference_rung": "closed-form (Nagaoka/Lorenz)",
         "h_m": sol_h,
         "nodes": rep_sol.mesh.nodes,
         "elements": rep_sol.mesh.elements,
@@ -247,72 +248,28 @@ def run_report(*, fast: bool = False, skip_elmer: bool = False) -> dict[str, obj
         "l_fem_h": l_fem,
         "l_ideal_h": l_ideal,
         "raw_dev_pct": raw_dev_pct,
+        "raw_dev_meaning": (
+            "error of the elementary ideal long-solenoid formula "
+            "(mu0*N^2*A/l omits the finite-length end effect at l/D = 10, l/R = 20; "
+            "the correction belongs to the reference, not the FEM)"
+        ),
         "nagaoka_factor": k_nagaoka,
         "l_nagaoka_h": l_nagaoka,
         "corrected_dev_pct": corr_dev_pct,
+        "corrected_dev_meaning": (
+            "FEM coenergy inductance vs the exact Nagaoka/Lorenz finite-length reference "
+            "L_ref = K_N * L_ideal"
+        ),
+        "gate_limit_pct": 0.5,
+        "gate_status": "PASS" if abs(corr_dev_pct) <= 0.5 else "FAIL",
         "definition": "L_fem = 2 * W' / I^2 = 2 * W' * N^2 / (N*I)^2",
         "end_effect_basis": (
             f"exact Nagaoka/Lorenz thin-sheet factor K_N={k_nagaoka:.8f} for l/D=10 (l/R=20)"
         ),
     }
 
-    # 3. STEEL CASE (Gate 3, h = 5e-4)
-    g3_h = 5.0e-4
+    # 4. FORCE VS MESH (Gate 4 — computed before finalizing Gate 3 combined band)
     steel_case = build_magnet_plate_case(0.0)
-    eng_g3 = _steel_engine(g3_h)
-    g3_maxwell = maxwell_force(steel_case, eng_g3, target="magnet", contour=CONTOUR_A)
-    g3_coenergy = coenergy_force(steel_case, eng_g3, target="magnet")
-    g3_coenergy_h2 = coenergy_force(steel_case, eng_g3, target="magnet", delta=0.5 * g3_h)
-    g3_coenergy_h4 = coenergy_force(steel_case, eng_g3, target="magnet", delta=0.25 * g3_h)
-    f_g3_m = g3_maxwell.force_n[2]
-    f_g3_c = g3_coenergy.force_n[2]
-    g3_agree_pct = 100.0 * abs(f_g3_m - f_g3_c) / max(abs(f_g3_m), abs(f_g3_c))
-    assert g3_maxwell.convergence is not None
-    op_pt = g3_maxwell.convergence.magnet_operating_points[0]
-    step_rows: list[dict[str, object]] = []
-    for label, res in (
-        ("h", g3_coenergy),
-        ("h/2", g3_coenergy_h2),
-        ("h/4", g3_coenergy_h4),
-    ):
-        assert res.delta_m is not None
-        f_step = float(res.force_n[2])
-        step_rows.append(
-            {
-                "label": label,
-                "delta_m": float(res.delta_m),
-                "f_coenergy_n": f_step,
-                "diff_vs_delta_h_pct": 100.0 * (f_step - f_g3_c) / abs(f_g3_c),
-                "vs_maxwell_pct": 100.0 * abs(f_step - f_g3_m) / max(abs(f_step), abs(f_g3_m)),
-            }
-        )
-    step_forces = [float(row["f_coenergy_n"]) for row in step_rows]
-    step_p2p_n = max(step_forces) - min(step_forces)
-    step_p2p_pct = 100.0 * step_p2p_n / abs(f_g3_c)
-    steel_data = {
-        "rungs": "Maxwell stress, coenergy",
-        "h_m": g3_h,
-        "nodes": g3_maxwell.mesh_nodes,
-        "elements": g3_maxwell.mesh_elements,
-        "f_maxwell_n": f_g3_m,
-        "f_coenergy_n": f_g3_c,
-        "agreement_pct": g3_agree_pct,
-        "contour_a_requested_m": list(CONTOUR_A),
-        "contour_a_snapped_m": list(g3_maxwell.contour) if g3_maxwell.contour else None,
-        "delta_m": g3_coenergy.delta_m,
-        "magnet_h_a_per_m": op_pt.h_a_per_m,
-        "magnet_b_t": op_pt.b_t,
-        "magnet_op_source": op_pt.source,
-        "coenergy_step_study": {
-            "rung": "coenergy (finite-difference step study)",
-            "h_m": g3_h,
-            "steps": step_rows,
-            "peak_to_peak_n": step_p2p_n,
-            "peak_to_peak_pct": step_p2p_pct,
-        },
-    }
-
-    # 4. FORCE VS MESH (Gate 4)
     mesh_hs = (2.0e-3, 1.0e-3, 5.0e-4) if fast else (1.0e-3, 5.0e-4, 2.5e-4)
     mesh_delta = 2.5e-4
     mesh_rows: list[dict[str, object]] = []
@@ -370,6 +327,164 @@ def run_report(*, fast: bool = False, skip_elmer: bool = False) -> dict[str, obj
         and float(rich_m["est_error_pct"]) < 1.0
         and float(rich_c["est_error_pct"]) < 1.0
     )
+
+    # 3. STEEL CASE (Gate 3, h = 5e-4)
+    g3_h = 5.0e-4
+    eng_g3 = _steel_engine(g3_h)
+    g3_maxwell = maxwell_force(steel_case, eng_g3, target="magnet", contour=CONTOUR_A)
+    delta_study = coenergy_delta_study(steel_case, eng_g3, target="magnet")
+    f_g3_m = float(g3_maxwell.force_n[2])
+    single_step = next(
+        s for s in delta_study.steps if math.isclose(s.delta_m, g3_h, rel_tol=1e-9, abs_tol=1e-12)
+    )
+    f_g3_c_single = float(single_step.force_n)
+    f_g3_c = (
+        float(delta_study.f_extrapolated_n)
+        if delta_study.f_extrapolated_n is not None
+        else f_g3_c_single
+    )
+    g3_agree_pct = 100.0 * abs(f_g3_m - f_g3_c) / max(abs(f_g3_m), abs(f_g3_c))
+    g3_agree_single_pct = 100.0 * abs(f_g3_m - f_g3_c_single) / max(abs(f_g3_m), abs(f_g3_c_single))
+    g3_gate_status = "PASS" if g3_agree_pct <= 2.0 else "FAIL"
+    assert g3_maxwell.convergence is not None
+    op_pt = g3_maxwell.convergence.magnet_operating_points[0]
+
+    step_unc_n = float(delta_study.step_uncertainty_n)
+    step_unc_pct = 100.0 * step_unc_n / abs(f_g3_c) if f_g3_c != 0.0 else math.nan
+
+    row_g3_mesh = next(
+        (row for row in mesh_rows if math.isclose(float(row["h_m"]), g3_h, rel_tol=1e-9)),
+        None,
+    )
+    if (
+        row_g3_mesh is not None
+        and math.isfinite(float(rich_c["f_extrap_n"]))
+        and float(rich_c["f_extrap_n"]) != 0.0
+    ):
+        spatial_pct = (
+            100.0
+            * abs(float(row_g3_mesh["f_coenergy_n"]) - float(rich_c["f_extrap_n"]))
+            / abs(float(rich_c["f_extrap_n"]))
+        )
+    else:
+        spatial_pct = math.nan
+
+    rss_pct = (
+        math.hypot(spatial_pct, step_unc_pct)
+        if (math.isfinite(spatial_pct) and math.isfinite(step_unc_pct))
+        else math.nan
+    )
+    linear_sum_pct = (
+        (spatial_pct + step_unc_pct)
+        if (math.isfinite(spatial_pct) and math.isfinite(step_unc_pct))
+        else math.nan
+    )
+    rss_n = abs(f_g3_c) * rss_pct / 100.0 if math.isfinite(rss_pct) else math.nan
+    linear_sum_n = (
+        abs(f_g3_c) * linear_sum_pct / 100.0 if math.isfinite(linear_sum_pct) else math.nan
+    )
+    combined_band = {
+        "spatial_h_m": g3_h,
+        "spatial_pct": spatial_pct,
+        "step_pct": step_unc_pct,
+        "step_n": step_unc_n,
+        "rss_pct": rss_pct,
+        "rss_n": rss_n,
+        "linear_sum_pct": linear_sum_pct,
+        "linear_sum_n": linear_sum_n,
+    }
+
+    step_rows: list[dict[str, object]] = []
+    for idx, step in enumerate(delta_study.steps):
+        prev_force = delta_study.steps[idx - 1].force_n if idx > 0 else None
+        change_vs_prev = (
+            None if prev_force is None else 100.0 * (step.force_n - prev_force) / abs(prev_force)
+        )
+        p_pair_row = (
+            delta_study.p_per_pair[idx - 2]
+            if idx >= 2 and (idx - 2) < len(delta_study.p_per_pair)
+            else None
+        )
+        step_rows.append(
+            {
+                "label": step.label,
+                "delta_m": step.delta_m,
+                "delta_over_h": step.delta_over_h,
+                "f_coenergy_n": step.force_n,
+                "change_vs_prev_pct": change_vs_prev,
+                "nodes": step.mesh_nodes,
+                "elements": step.mesh_elements,
+                "order_p": p_pair_row,
+                "diff_vs_delta_h_pct": 100.0 * (step.force_n - f_g3_c_single) / abs(f_g3_c_single),
+                "vs_maxwell_pct": (
+                    100.0 * abs(step.force_n - f_g3_m) / max(abs(step.force_n), abs(f_g3_m))
+                ),
+            }
+        )
+
+    distinct_meshes = sorted({(s.mesh_nodes, s.mesh_elements) for s in delta_study.steps})
+    mesh_desc = ", ".join(f"{n} nodes / {e} elements" for n, e in distinct_meshes)
+    remeshing_mechanism = (
+        f"Remeshing mechanism: shifted magnet boundaries at delta < h land between uniform "
+        f"h={g3_h:.2e} m grid lines ({mesh_desc} vs unshifted "
+        f"{g3_maxwell.mesh_nodes} nodes / {g3_maxwell.mesh_elements} elements), adding an "
+        f"extra z-line and splitting the 1 mm air gap asymmetrically (2 cells at +delta vs "
+        f"3 cells at -delta)."
+    )
+
+    steel_data = {
+        "rungs": "Maxwell stress, coenergy",
+        "h_m": g3_h,
+        "nodes": g3_maxwell.mesh_nodes,
+        "elements": g3_maxwell.mesh_elements,
+        "f_maxwell_n": f_g3_m,
+        "f_coenergy_n": f_g3_c,
+        "f_coenergy_single_step_n": f_g3_c_single,
+        "agreement_pct": g3_agree_pct,
+        "agreement_single_step_pct": g3_agree_single_pct,
+        "agreement_band": combined_band,
+        "agreement_gate_limit_pct": 2.0,
+        "agreement_gate_status": g3_gate_status,
+        "combined_band": combined_band,
+        "contour_a_requested_m": list(CONTOUR_A),
+        "contour_a_snapped_m": list(g3_maxwell.contour) if g3_maxwell.contour else None,
+        "delta_m": g3_h,
+        "coenergy_delta_basis": "extrapolated over h/8..h using observed order p_fit",
+        "magnet_h_a_per_m": op_pt.h_a_per_m,
+        "magnet_b_t": op_pt.b_t,
+        "magnet_op_source": op_pt.source,
+        "coenergy_step_study": {
+            "rung": "coenergy (finite-difference step convergence study)",
+            "target": delta_study.target,
+            "h_m": delta_study.h_m,
+            "steps": step_rows,
+            "refused": [{"delta_m": d, "reason": r} for d, r in delta_study.refused],
+            "p_per_pair": list(delta_study.p_per_pair),
+            "p_fit": delta_study.p_fit,
+            "monotonic": delta_study.monotonic,
+            "asymptotic": delta_study.asymptotic,
+            "asymptotic_note": (
+                "YES (nominal central-difference order 2)"
+                if delta_study.asymptotic
+                else "NO (nominal 2) — ladder is NOT in its asymptotic range; extrapolation is a "
+                "best estimate with a wider band, not a demonstrated limit"
+            ),
+            "f_extrapolated_n": delta_study.f_extrapolated_n,
+            "step_uncertainty_n": step_unc_n,
+            "step_uncertainty_pct": step_unc_pct,
+            "peak_to_peak_n": delta_study.peak_to_peak_n,
+            "peak_to_peak_pct": delta_study.peak_to_peak_pct,
+            "combined_band": combined_band,
+            "remeshing_mechanism": remeshing_mechanism,
+            "superseded_single_step": {
+                "label": "superseded history (single-step delta=h)",
+                "delta_m": g3_h,
+                "f_coenergy_n": f_g3_c_single,
+                "agreement_pct": g3_agree_single_pct,
+            },
+            "notes": list(delta_study.notes),
+        },
+    }
 
     # 5. CONTOURS (Gate 5, h = 5e-4)
     res_a = g3_maxwell
@@ -490,43 +605,95 @@ def print_report(payload: dict[str, object]) -> None:
     sol = payload["solenoid_inductance"]
     print("2 SOLENOID L")
     print(f"Definition: {sol['definition']} (h = {sol['h_m']:.2e} m, {sol['nodes']} nodes)")
+    print(
+        f"Explanation: L_fem = {sol['l_fem_h']:.6e} H vs elementary ideal formula "
+        f"L_ideal = {sol['l_ideal_h']:.6e} H."
+    )
+    print(f"  - raw dev% = {sol['raw_dev_pct']:+.3f}%: {sol['raw_dev_meaning']}.")
+    print(f"  - corrected dev% = {sol['corrected_dev_pct']:+.4f}%: {sol['corrected_dev_meaning']}.")
     h2 = (
-        f"{'Rung':<10} | {'L_fem (H)':>13} | {'L_ideal (H)':>13} | {'raw dev%':>9} | "
-        f"{'end-effect factor + basis':<74} | {'corrected dev%':>14}"
+        f"{'Rung':<10} | {'L_fem (H)':>13} | {'L_ref = K_N*L_ideal (H)':>23} | "
+        f"{'K_N + basis':<74} | {'raw dev% (ideal-formula error)':>30} | "
+        f"{'corrected dev% (FEM vs reference)':>33} | gate <= 0.5%"
     )
     print(h2)
     print("-" * len(h2))
     print(
-        f"{sol['rung']:<10} | {sol['l_fem_h']:>13.6e} | {sol['l_ideal_h']:>13.6e} | "
-        f"{sol['raw_dev_pct']:>+8.3f}% | {sol['end_effect_basis']:<74} | {sol['corrected_dev_pct']:>+13.4f}%"
+        f"{sol['rung']:<10} | {sol['l_fem_h']:>13.6e} | {sol['l_nagaoka_h']:>23.6e} | "
+        f"{sol['end_effect_basis']:<74} | {sol['raw_dev_pct']:>+29.3f}% | "
+        f"{sol['corrected_dev_pct']:>+32.4f}% | {sol['gate_status']}"
     )
     print()
 
     # 3. STEEL CASE
     st = payload["steel_case"]
+    ss = st["coenergy_step_study"]
+    cb = st["combined_band"]
+    sup = ss["superseded_single_step"]
     print("3 STEEL CASE")
     h3 = (
-        f"{'Rungs':<25} | {'F_maxwell':>10} | {'F_coenergy':>10} | {'agreement%':>10} | "
-        f"{'contour A (snapped, m)':<34} | {'delta (m)':>9} | {'magnet (H A/m, B T)'}"
+        f"{'Rungs':<25} | {'F_maxwell':>10} | {'F_coenergy (extrap)':>19} | {'agreement%':>10} | "
+        f"{'gate <= 2%':>10} | {'contour A (snapped, m)':<34} | {'delta basis':<16} | "
+        f"{'magnet (H A/m, B T)'}"
     )
     print(h3)
     print("-" * len(h3))
     c_str = "(" + ", ".join(f"{v:.6g}" for v in st["contour_a_snapped_m"]) + ")"
     op_str = f"({st['magnet_h_a_per_m']:.1f}, {st['magnet_b_t']:.6f})"
     print(
-        f"{st['rungs']:<25} | {st['f_maxwell_n']:>10.5f} | {st['f_coenergy_n']:>10.5f} | "
-        f"{st['agreement_pct']:>9.4f}% | {c_str:<34} | {st['delta_m']:>9.2e} | {op_str}"
-    )
-    ss = st["coenergy_step_study"]
-    step_parts = ", ".join(
-        f"delta={item['label']} ({item['delta_m']:.2e} m): "
-        f"{item['f_coenergy_n']:.5f} N ({item['diff_vs_delta_h_pct']:+.3f}% vs delta=h)"
-        for item in ss["steps"]
+        f"{st['rungs']:<25} | {st['f_maxwell_n']:>10.5f} | {st['f_coenergy_n']:>19.5f} | "
+        f"{st['agreement_pct']:>9.4f}% | {st['agreement_gate_status']:>10} | {c_str:<34} | "
+        f"{'extrap (h/8..h)':<16} | {op_str}"
     )
     print(
-        f"{ss['rung']}: {step_parts}; "
+        f"Superseded single-step history (delta = h = {sup['delta_m']:.2e} m): "
+        f"F_coenergy = {sup['f_coenergy_n']:.5f} N, agreement = {sup['agreement_pct']:.4f}%"
+    )
+    h3s = (
+        f"{'delta (m)':>10} | {'delta/h':>7} | {'F_coenergy (N)':>14} | "
+        f"{'change vs previous row %':>24} | {'nodes':>6} | {'elements':>8} | {'order p':>8}"
+    )
+    print(h3s)
+    print("-" * len(h3s))
+    for row in ss["steps"]:
+        chg_s = (
+            "---" if row["change_vs_prev_pct"] is None else f"{row['change_vs_prev_pct']:>+23.3f}%"
+        )
+        p_s = "---" if row["order_p"] is None else f"{row['order_p']:>+8.3f}"
+        print(
+            f"{row['delta_m']:>10.2e} | {row['delta_over_h']:>7.3f} | "
+            f"{row['f_coenergy_n']:>14.5f} | {chg_s:>24} | {row['nodes']:>6d} | "
+            f"{row['elements']:>8d} | {p_s:>8}"
+        )
+    p_pair_str = ", ".join("---" if val is None else f"{val:+.5f}" for val in ss["p_per_pair"])
+    p_fit_str = "None" if ss["p_fit"] is None else f"{ss['p_fit']:+.5f}"
+    asym_str = "YES" if ss["asymptotic"] else "NO"
+    print(
+        f"Observed order: p_per_pair = ({p_pair_str}), p_fit = {p_fit_str}; "
+        f"asymptotic? {asym_str} (nominal 2)"
+    )
+    if not ss["asymptotic"]:
+        print(
+            "  NOTE: the delta ladder is NOT in its asymptotic range (nominal 2); "
+            "the extrapolation is a best estimate with a wider band, not a demonstrated limit."
+        )
+    print(
+        f"Extrapolated F_coenergy = {ss['f_extrapolated_n']:.5f} N; "
+        f"step_uncertainty = {ss['step_uncertainty_n']:.5f} N ({ss['step_uncertainty_pct']:.3f}%); "
         f"peak-to-peak spread = {ss['peak_to_peak_n']:.5f} N ({ss['peak_to_peak_pct']:.3f}%)"
     )
+    print(
+        f"Combined band (at h = {cb['spatial_h_m']:.2e} m): "
+        f"spatial = {cb['spatial_pct']:.3f}%, step = {cb['step_pct']:.3f}% -> "
+        f"RSS = {cb['rss_pct']:.3f}% (+/- {cb['rss_n']:.5f} N), "
+        f"linear sum = {cb['linear_sum_pct']:.3f}% (+/- {cb['linear_sum_n']:.5f} N)"
+    )
+    print(
+        f"Recomputed Maxwell vs extrapolated coenergy agreement: {st['agreement_pct']:.4f}% "
+        f"(combined band RSS +/- {cb['rss_pct']:.3f}%, linear sum +/- {cb['linear_sum_pct']:.3f}%) "
+        f"-> gate <= {st['agreement_gate_limit_pct']:.1f}%: {st['agreement_gate_status']}"
+    )
+    print(ss["remeshing_mechanism"])
     print()
 
     # 4. FORCE VS MESH

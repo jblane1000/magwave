@@ -32,7 +32,7 @@ Two independent methods are implemented on top of :class:`~magwave.fem2d.engine.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -95,6 +95,37 @@ class ForceResult:
     coenergy_j: float | None = None
     delta_m: float | None = None
     notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DeltaStep:
+    """One successful virtual-work solve in a finite-difference step convergence sweep."""
+
+    label: str
+    delta_m: float
+    delta_over_h: float
+    force_n: float
+    mesh_nodes: int
+    mesh_elements: int
+
+
+@dataclass(frozen=True)
+class DeltaStudyResult:
+    """Result of a finite-difference virtual-work step convergence study."""
+
+    target: str
+    h_m: float
+    steps: tuple[DeltaStep, ...]
+    refused: tuple[tuple[float, str], ...]
+    p_per_pair: tuple[float | None, ...]
+    p_fit: float | None
+    monotonic: bool
+    asymptotic: bool
+    f_extrapolated_n: float | None
+    step_uncertainty_n: float
+    peak_to_peak_n: float
+    peak_to_peak_pct: float
+    notes: tuple[str, ...]
 
 
 def _component_label(component: Component, index: int) -> str:
@@ -1029,6 +1060,347 @@ def coenergy_force(
         coenergy_j=pot_mid,
         delta_m=delta_used,
         notes=tuple(notes),
+    )
+
+
+def _format_delta_label(delta_m: float, h_m: float) -> str:
+    ratio = delta_m / h_m
+    if math.isclose(ratio, 1.0, rel_tol=1e-9, abs_tol=1e-12):
+        return "h"
+    if 0.0 < ratio < 1.0:
+        inv = round(1.0 / ratio)
+        if 2 <= inv <= 1024 and math.isclose(ratio, 1.0 / inv, rel_tol=1e-9, abs_tol=1e-12):
+            return f"h/{inv}"
+    if ratio > 1.0:
+        mult = round(ratio)
+        if 2 <= mult <= 1024 and math.isclose(ratio, float(mult), rel_tol=1e-9, abs_tol=1e-12):
+            return f"{mult}h"
+    return f"delta/h={ratio:.4g}"
+
+
+def _observed_order_for_triple(
+    d0: float,
+    d1: float,
+    d2: float,
+    diff_fine: float,
+    diff_coarse: float,
+) -> float | None:
+    """Return observed order ``p`` for a triple ``d0 < d1 < d2`` given ``D0=F1-F0``, ``D1=F2-F1``."""
+    if diff_fine == 0.0 or diff_coarse == 0.0:
+        return None
+    ratio_d = diff_coarse / diff_fine
+    if not math.isfinite(ratio_d) or ratio_d <= 0.0:
+        return None
+    r0 = d1 / d0
+    r1 = d2 / d1
+    if math.isclose(r0, r1, rel_tol=1e-9, abs_tol=1e-12):
+        return float(math.log(ratio_d) / math.log(r0))
+
+    def _g(p_val: float) -> float:
+        if abs(p_val) < 1e-12:
+            return math.log(r1) / math.log(r0) - ratio_d
+        return (r0**p_val) * ((r1**p_val) - 1.0) / ((r0**p_val) - 1.0) - ratio_d
+
+    lo, hi = -20.0, 20.0
+    g_lo, g_hi = _g(lo), _g(hi)
+    if not (math.isfinite(g_lo) and math.isfinite(g_hi)) or g_lo * g_hi > 0.0:
+        return None
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        g_mid = _g(mid)
+        if g_mid == 0.0:
+            return float(mid)
+        if g_lo * g_mid <= 0.0:
+            hi = mid
+        else:
+            lo = mid
+            g_lo = g_mid
+    return float(0.5 * (lo + hi))
+
+
+def _analyze_delta_ladder(
+    target: str,
+    h_m: float,
+    steps: tuple[DeltaStep, ...],
+    refused: tuple[tuple[float, str], ...],
+    *,
+    base_mesh_counts: tuple[int, int] | None = None,
+    extra_notes: tuple[str, ...] = (),
+) -> DeltaStudyResult:
+    """Compute observed order, asymptotic flag, extrapolation, and uncertainty for a ladder."""
+    n = len(steps)
+    forces = [s.force_n for s in steps]
+    peak_to_peak_n = float(max(forces) - min(forces)) if forces else 0.0
+    diffs = [steps[i + 1].force_n - steps[i].force_n for i in range(n - 1)]
+
+    if n <= 1:
+        monotonic = True
+    else:
+        monotonic = (
+            all(d > 0.0 for d in diffs)
+            or all(d < 0.0 for d in diffs)
+            or all(d == 0.0 for d in diffs)
+        )
+
+    p_per_pair = tuple(
+        _observed_order_for_triple(
+            steps[i].delta_m,
+            steps[i + 1].delta_m,
+            steps[i + 2].delta_m,
+            diffs[i],
+            diffs[i + 1],
+        )
+        for i in range(max(0, n - 2))
+    )
+
+    best_run: list[int] = []
+    curr_run: list[int] = []
+    curr_sign = 0
+    for idx, diff in enumerate(diffs):
+        if diff == 0.0:
+            if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+                best_run = curr_run
+            curr_run = []
+            curr_sign = 0
+            continue
+        sign = 1 if diff > 0.0 else -1
+        if sign == curr_sign:
+            curr_run.append(idx)
+        else:
+            if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+                best_run = curr_run
+            curr_run = [idx]
+            curr_sign = sign
+    if len(curr_run) >= 2 and len(curr_run) > len(best_run):
+        best_run = curr_run
+
+    p_fit: float | None = None
+    if len(best_run) >= 2:
+        x_fit = np.log(np.array([steps[i].delta_m for i in best_run], dtype=np.float64))
+        y_fit = np.log(np.array([abs(diffs[i]) for i in best_run], dtype=np.float64))
+        if np.ptp(x_fit) > 0.0 and np.all(np.isfinite(y_fit)):
+            slope = float(np.polyfit(x_fit, y_fit, 1)[0])
+            if math.isfinite(slope):
+                p_fit = slope
+
+    ratios_gt_one = n >= 3 and all(
+        diffs[i] != 0.0 and (diffs[i + 1] / diffs[i]) > 1.0 for i in range(n - 2)
+    )
+    asymptotic = bool(
+        n >= 3 and monotonic and ratios_gt_one and p_fit is not None and 1.5 <= p_fit <= 2.5
+    )
+
+    notes: list[str] = list(extra_notes)
+    f_ext: float | None
+    if n < 2:
+        f_ext = None
+        notes.append("fewer than 2 valid delta steps; extrapolation unavailable")
+    elif all(d == 0.0 for d in diffs):
+        f_ext = float(steps[0].force_n)
+        notes.append("force is invariant across all tested delta steps")
+    else:
+        p_used = (
+            p_fit
+            if (p_fit is not None and math.isfinite(p_fit) and p_fit > 0.0)
+            else next(
+                (
+                    p_val
+                    for p_val in p_per_pair
+                    if p_val is not None and math.isfinite(p_val) and p_val > 0.0
+                ),
+                None,
+            )
+        )
+        if p_used is None:
+            f_ext = None
+            notes.append(
+                "no positive observed convergence order exists across tested delta steps; "
+                "extrapolation unavailable"
+            )
+        else:
+            r0 = steps[1].delta_m / steps[0].delta_m
+            f_ext = float(
+                steps[0].force_n + (steps[0].force_n - steps[1].force_n) / (r0**p_used - 1.0)
+            )
+
+    triple_exts: list[tuple[int, float]] = []
+    for idx, p_val in enumerate(p_per_pair):
+        if p_val is not None and math.isfinite(p_val) and p_val > 0.0:
+            r_triple = steps[idx + 1].delta_m / steps[idx].delta_m
+            ext_val = float(
+                steps[idx].force_n
+                + (steps[idx].force_n - steps[idx + 1].force_n) / (r_triple**p_val - 1.0)
+            )
+            triple_exts.append((idx, ext_val))
+
+    if f_ext is not None:
+        correction = abs(f_ext - steps[0].force_n)
+        candidates = [f_ext, *(val for _, val in triple_exts)]
+        spread = float(max(candidates) - min(candidates)) if len(candidates) >= 2 else 0.0
+        step_uncertainty_n = float(max(correction, spread))
+    else:
+        step_uncertainty_n = float(peak_to_peak_n)
+
+    ref_scale = (
+        abs(f_ext)
+        if (f_ext is not None and f_ext != 0.0)
+        else (max(abs(f) for f in forces) if forces else 0.0)
+    )
+    peak_to_peak_pct = float(100.0 * peak_to_peak_n / ref_scale) if ref_scale > 0.0 else 0.0
+
+    if not asymptotic:
+        notes.append(
+            "the ladder is not in its asymptotic range (nominal central-difference order 2), "
+            "so the extrapolation is a best estimate with a correspondingly wider band, not a "
+            "demonstrated limit"
+        )
+    if triple_exts:
+        triple_desc = ", ".join(
+            f"({steps[idx].label}, {steps[idx + 1].label}, {steps[idx + 2].label}): {val:.5f} N"
+            for idx, val in triple_exts
+        )
+        notes.append(f"triple extrapolations with positive order: {triple_desc}")
+
+    counts = sorted({(s.mesh_nodes, s.mesh_elements) for s in steps})
+    changed_counts = (
+        [c for c in counts if c != base_mesh_counts] if base_mesh_counts is not None else []
+    )
+    if len(counts) > 1 or changed_counts:
+        counts_str = ", ".join(f"{nodes}n/{elems}e" for nodes, elems in counts)
+        if base_mesh_counts is not None:
+            notes.append(
+                f"remeshing observed across delta steps (baseline "
+                f"{base_mesh_counts[0]}n/{base_mesh_counts[1]}e vs shifted {counts_str}): "
+                "shifted target boundaries land between uniform h grid lines, inserting extra "
+                "z-lines"
+            )
+        else:
+            notes.append(
+                f"remeshing observed across delta steps ({counts_str}): shifted target "
+                "boundaries land between uniform h grid lines"
+            )
+
+    if refused:
+        notes.append(f"{len(refused)} delta step(s) refused due to axial-clearance constraints")
+
+    return DeltaStudyResult(
+        target=target,
+        h_m=float(h_m),
+        steps=steps,
+        refused=refused,
+        p_per_pair=p_per_pair,
+        p_fit=p_fit,
+        monotonic=monotonic,
+        asymptotic=asymptotic,
+        f_extrapolated_n=f_ext,
+        step_uncertainty_n=step_uncertainty_n,
+        peak_to_peak_n=peak_to_peak_n,
+        peak_to_peak_pct=peak_to_peak_pct,
+        notes=tuple(notes),
+    )
+
+
+def coenergy_delta_study(
+    case: Case,
+    engine: Fem2dEngine,
+    *,
+    target: str | None = None,
+    deltas: Iterable[float] | None = None,
+    direction: str = "z",
+) -> DeltaStudyResult:
+    """Run a finite-difference step convergence study on top of :func:`coenergy_force`."""
+    if direction != "z":
+        raise ForceError(
+            E_FORCE_UNSUPPORTED_CASE,
+            f"{case.name}: direction={direction!r} is not axisymmetric; only axial 'z' virtual "
+            "displacement is meaningful in Tier 1 axisymmetric FEM.",
+        )
+
+    target_idx, target_comp, target_label = _resolve_target(case, target)
+    solve_case = _prepare_solve_case(case, engine)
+    force_engine, h_eff = _force_engine_for_case(solve_case, engine, target_comp)
+    base_mesh, _, _ = force_engine._build_mesh_and_load(solve_case)
+    base_counts = (int(base_mesh.nodes.shape[0]), int(base_mesh.elements.shape[0]))
+
+    if deltas is None:
+        delta_list = [h_eff / 8.0, h_eff / 4.0, h_eff / 2.0, h_eff]
+    else:
+        raw_deltas: list[float] = []
+        for item in deltas:
+            if isinstance(item, bool) or not isinstance(item, int | float):
+                raise ForceError(
+                    E_FORCE_UNSUPPORTED_CASE,
+                    f"{case.name}: deltas entries must be positive finite numbers, got {item!r}.",
+                )
+            val = float(item)
+            if not math.isfinite(val) or val <= 0.0:
+                raise ForceError(
+                    E_FORCE_UNSUPPORTED_CASE,
+                    f"{case.name}: deltas entries must be positive and finite, got {item!r}.",
+                )
+            raw_deltas.append(val)
+        if not raw_deltas:
+            raise ForceError(
+                E_FORCE_UNSUPPORTED_CASE,
+                f"{case.name}: deltas must contain at least one positive value.",
+            )
+        raw_deltas.sort()
+        delta_list = []
+        for val in raw_deltas:
+            if not delta_list or abs(val - delta_list[-1]) > 1e-15 * max(1.0, abs(val)):
+                delta_list.append(val)
+
+    steps: list[DeltaStep] = []
+    refused: list[tuple[float, str]] = []
+    extra_notes: list[str] = []
+
+    for delta_m in delta_list:
+        try:
+            res = coenergy_force(
+                case,
+                engine,
+                target=target,
+                delta=delta_m,
+                direction=direction,
+            )
+        except ForceError as exc:
+            if exc.code == E_FORCE_UNSUPPORTED_CASE:
+                refused.append((float(delta_m), str(exc)))
+                continue
+            raise
+
+        mesh_plus, _, _ = force_engine._build_mesh_and_load(
+            _shift_target(solve_case, target_idx, +delta_m)
+        )
+        mesh_minus, _, _ = force_engine._build_mesh_and_load(
+            _shift_target(solve_case, target_idx, -delta_m)
+        )
+        n_plus, e_plus = int(mesh_plus.nodes.shape[0]), int(mesh_plus.elements.shape[0])
+        n_minus, e_minus = int(mesh_minus.nodes.shape[0]), int(mesh_minus.elements.shape[0])
+        if (n_plus, e_plus) != (n_minus, e_minus):
+            extra_notes.append(
+                f"delta={delta_m:g} m: asymmetric shifted mesh counts "
+                f"+delta=({n_plus}n/{e_plus}e) vs -delta=({n_minus}n/{e_minus}e)"
+            )
+        step_nodes, step_elems = (n_plus, e_plus) if n_plus >= n_minus else (n_minus, e_minus)
+        steps.append(
+            DeltaStep(
+                label=_format_delta_label(delta_m, h_eff),
+                delta_m=float(delta_m),
+                delta_over_h=float(delta_m / h_eff),
+                force_n=float(res.force_n[2]),
+                mesh_nodes=step_nodes,
+                mesh_elements=step_elems,
+            )
+        )
+
+    return _analyze_delta_ladder(
+        target_label,
+        h_eff,
+        tuple(steps),
+        tuple(refused),
+        base_mesh_counts=base_counts,
+        extra_notes=tuple(extra_notes),
     )
 
 

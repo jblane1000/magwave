@@ -80,11 +80,14 @@ Neumann reference self-check at `L/a = 1e-3` vs closed-form loop `dM/dd`: relati
 
 ### Gate 2 — Solenoid inductance from coenergy (`R = 10 mm`, `L = 200 mm`, `N = 400`, `I = 1 A`, `h = 5e-4 m`)
 
-Definition: `L_fem = 2 * W' / I^2 = 2 * W' * N^2 / (N * I)^2` (`coenergy`, `31 168` nodes / `61 236` elements). Because `l / D = 10` (`l / R = 20`) has a `-4.1193%` finite-length end effect, raw deviation from `L_ideal = mu_0 N^2 pi R^2 / l` exceeds `0.5%`; applying the exact Nagaoka/Lorenz thin-sheet factor `K_N = 0.95880712` (`closed-form (Neumann)`) reduces the deviation to `-0.0327%` (`<= 0.5%` PASS):
+- **Framing & explanation (before numbers):**
+  - `L_fem = 2 * W' / I^2 = 2 * W' * N^2 / (N * I)^2 = 3.027186e-04 H` (`coenergy`, `31 168` nodes / `61 236` elements).
+  - **`raw dev%` (`-4.151%`) is the error of the elementary ideal long-solenoid formula** `L_ideal = mu_0 N^2 pi R^2 / l = 3.158273e-04 H`, which omits the finite-length end effect at `l / D = 10` (`l / R = 20`); the finite-length correction belongs to the reference formula, not to the FEM solver.
+  - **`corrected dev%` (`-0.0327%`) is FEM vs the exact Nagaoka/Lorenz thin-sheet reference** `L_ref = K_N * L_ideal = 3.028175e-04 H` using basis `K_N = 0.95880712` (`l/D = 10`, `l/R = 20`), well inside the `<= 0.5%` gate (`PASS`).
 
-| Rung | `L_fem` (H) | `L_ideal` (H) | Raw dev | End-effect factor + basis | Corrected dev |
-|---|---:|---:|---:|---|---:|
-| coenergy | `3.027186e-04` | `3.158273e-04` | `-4.151%` | Exact Nagaoka `K_N = 0.95880712` (`l/D = 10`, `l/R = 20`) | `-0.0327%` |
+| Rung | `L_fem` (H) | `L_ref = K_N * L_ideal` (H) | `K_N` + basis | Raw dev% (ideal-formula error) | Corrected dev% (FEM vs reference) | Gate (`<= 0.5%`) |
+|---|---:|---:|---|---:|---:|---|
+| coenergy | `3.027186e-04` | `3.028175e-04` | Exact Nagaoka/Lorenz thin-sheet `K_N = 0.95880712` (`l/D = 10`, `l/R = 20`) | `-4.151%` | `-0.0327%` | PASS |
 
 ### Gate 3 — Magnet on steel plate (`N42-20C-LINEAR-RECOIL` + `steel-team20`, `h = 5e-4 m`, `1 mm` gap)
 
@@ -128,6 +131,30 @@ ElmerGrid `tools/elmer/magnet_plate.grd` (`18 315` nodes / `18 040` Q1 quads, `0
 
 ## Consequences
 
-- `magwave.fem2d.force` provides deterministic, Qt-free/OCP-free axisymmetric force evaluation (`maxwell_force`, `coenergy_force`, `magnetic_coenergy`, `ForceResult`, `ForceError`) and honest torque refusal (`torque`), integrated behind `Fem2dEngine.force` / `Fem2dEngine.torque`.
+- `magwave.fem2d.force` provides deterministic, Qt-free/OCP-free axisymmetric force evaluation (`maxwell_force`, `coenergy_force`, `magnetic_coenergy`, `coenergy_delta_study`, `ForceResult`, `DeltaStep`, `DeltaStudyResult`, `ForceError`) and honest torque refusal (`torque`), integrated behind `Fem2dEngine.force` / `Fem2dEngine.torque`.
 - `MagpylibEngine` rejects permeable force requests cleanly with `E_UNSUPPORTED_FORCE_PERMEABLE`, preventing silent free-space approximations when steel is present.
 - All 27 frozen benchmarks and existing non-force `Fem2dEngine.solve()` results remain unchanged.
+
+## Amendment — M5.4b (delta convergence + Gate 2 framing)
+
+Measured in this checkout on 2026-11-21 with `env -u PYTHONPATH .venv/bin/python tools/force_report.py` (`Fem2dEngine` bumped `+m5.4` -> `+m5.4b` because the reported Gate 3 coenergy figure moved from single-step `delta = h` to the delta-extrapolated value; `ForceResult` fields, Gate 4–6 numbers, and Gate 7 SHA-256 hashes remain bit-identical).
+
+1. **Coenergy finite-difference step (`delta`) convergence study (`coenergy_delta_study`) at `h = 5.00e-04 m` (Gate 3 steel case):**
+
+   | `delta` (m) | `delta / h` | `F_coenergy` (N) | Change vs previous row | Nodes | Elements | Observed order `p` |
+   |---:|---:|---:|---:|---:|---:|---:|
+   | `6.25e-05` (`h/8`) | `0.125` | `101.18890` | `---` | 12 220 | 23 994 | `---` |
+   | `1.25e-04` (`h/4`) | `0.250` | `101.59921` | `+0.405%` | 12 220 | 23 994 | `---` |
+   | `2.50e-04` (`h/2`) | `0.500` | `101.98703` | `+0.382%` | 12 220 | 23 994 | `-0.081` |
+   | `5.00e-04` (`h`) | `1.000` | `102.81233` | `+0.809%` | 12 126 | 23 808 | `+1.090` |
+
+   - **Observed order & asymptotic check:** `p_per_pair = (-0.08134, +1.08954)`, least-squares `p_fit = +0.50410`, `monotonic = True`, **`asymptotic = NO` (nominal central-difference order 2)**. The ladder is **not** in its asymptotic range, so the extrapolation is a best estimate with a correspondingly wider band rather than a demonstrated limit.
+   - **Extrapolation & step band:** `F_extrapolated = 100.20786 N`, `step_uncertainty = 1.04757 N` (`1.045%`, set by the spread between `F_extrapolated = 100.20786 N` and the `(h/4, h/2, h)` triple extrapolation `101.25542 N`, vs correction `|F_ext - F(h/8)| = 0.98105 N`), peak-to-peak spread `= 1.62343 N` (`1.620%`).
+   - **Remeshing mechanism:** shifted magnet boundaries at `delta < h` (`h/8`, `h/4`, `h/2`) land between uniform `h = 5.00e-04 m` grid lines, adding one extra `z`-line (`129 -> 130` `z`-lines; `12 126` nodes / `23 808` elements unshifted and at `delta = h`, vs `12 220` nodes / `23 994` elements at `delta < h`) and dividing the `1 mm` air gap asymmetrically (`2` cells at `+delta` vs `3` cells at `-delta`).
+   - **Combined uncertainty band (at `h = 5.00e-04 m`):** Gate 4 coenergy spatial estimate `= 0.863%` (`|101.98703 - 101.11467| / 101.11467`), step uncertainty `= 1.045%` -> **RSS `= 1.355%` (`+/- 1.35824 N`)**, **linear sum `= 1.908%` (`+/- 1.91211 N`)**.
+   - **Recomputed Gate 3 agreement & gate verdict:** vs `F_maxwell = 102.28330 N` (contour A), recomputed agreement `= 2.0291%` (with combined band RSS `+/- 1.355%`, linear sum `+/- 1.908%`) -> **`FAIL` against the unchanged `<= 2%` gate** (and `test_coenergy_delta_study_gate3_agreement_gate` fails honestly at `2.0291% > 2.0%`).
+   - **Superseded single-step history:** the previous single-step `delta = h = 5.00e-04 m` value (`F_coenergy = 102.81233 N`, agreement `0.5146%`) is retained explicitly as superseded history.
+
+2. **Gate 2 framing:** `tools/force_report.py`, §Gate 2 above, and `test_gate2_solenoid_inductance_from_coenergy` now lead with the physical explanation before the table (`raw dev% = -4.151%` is the error of the elementary ideal formula `mu_0 N^2 A / l` omitting the `l/D = 10` end effect; `corrected dev% = -0.0327%` is FEM vs the exact Nagaoka/Lorenz thin-sheet reference `K_N * L_ideal`, `K_N = 0.95880712`, `PASS` at `<= 0.5%`), with the revised column order `Rung | L_fem (H) | L_ref = K_N*L_ideal (H) | K_N + basis | raw dev% (ideal-formula error) | corrected dev% (FEM vs reference) | gate <= 0.5%`.
+
+3. **Gate integrity:** **No gate was relaxed** (`2%` Maxwell-vs-coenergy method agreement, `1%` loop force, `0.5%` Gate 2 Nagaoka inductance, and `<= 5%` Elmer cross-check all stay unchanged).
