@@ -237,7 +237,7 @@ def parse_grid(spec: str) -> np.ndarray:
             raise ValueError(f"--grid {label} axis: step must be positive, got {step!r}")
         if stop < start:
             raise ValueError(f"--grid {label} axis: max {stop!r} is below min {start!r}")
-        count = int(math.floor((stop - start + GRID_INCLUSIVE_TOL) / step)) + 1
+        count = math.floor((stop - start + GRID_INCLUSIVE_TOL) / step) + 1
         axes.append(start + step * np.arange(count, dtype=float))
     mesh = np.meshgrid(*axes, indexing="ij")
     return np.stack([axis.ravel() for axis in mesh], axis=1)

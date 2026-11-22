@@ -372,7 +372,7 @@ def _build_qt_classes() -> dict[str, Any]:
             self._Iren.Initialize()
             self._initialized = True
 
-        def closeEvent(self, event: Any) -> None:  # noqa: N802
+        def closeEvent(self, event: Any) -> None:
             BasePlotter.close(self)
             QVTKRenderWindowInteractor.closeEvent(self, event)
 
@@ -497,7 +497,7 @@ def _build_qt_classes() -> dict[str, Any]:
                     "B-vector glyphs. Slices/iso-surfaces/streamlines are not implemented in v1."
                 )
 
-        def closeEvent(self, event: Any) -> None:  # noqa: N802
+        def closeEvent(self, event: Any) -> None:
             if self.plotter is not None:
                 self.plotter.close()
                 self.plotter = None
@@ -960,7 +960,7 @@ def _build_qt_classes() -> dict[str, Any]:
                 self._refresh_problems()
                 self.statusBar().showMessage(f"Export failed: {exc}")
 
-        def closeEvent(self, event: Any) -> None:  # noqa: N802
+        def closeEvent(self, event: Any) -> None:
             self.viewport.close()
             super().closeEvent(event)
 

@@ -33,8 +33,6 @@ from .nonlinear import (
 from .solve import SolveReport, dirichlet_nodes, solve_axisymmetric
 
 __all__ = [
-    "DeltaStep",
-    "DeltaStudyResult",
     "ENGINE_ID",
     "E_FORCE_CONTOUR_DOES_NOT_ENCLOSE",
     "E_FORCE_CONTOUR_IN_MATERIAL",
@@ -44,13 +42,15 @@ __all__ = [
     "E_FORCE_UNSUPPORTED_CASE",
     "E_NOT_CONVERGED",
     "E_TORQUE_NOT_MEANINGFUL",
+    "RUNG",
+    "DeltaStep",
+    "DeltaStudyResult",
     "Fem2dEngine",
     "ForceError",
     "ForceResult",
     "Mesh",
     "MeshStats",
     "NonlinearConvergenceError",
-    "RUNG",
     "SolveReport",
     "assemble_nonlinear_system",
     "coenergy_delta_study",

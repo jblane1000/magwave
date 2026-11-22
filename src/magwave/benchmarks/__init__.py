@@ -33,9 +33,9 @@ from .harness import (
 )
 
 __all__ = [
-    "AccuracyRow",
     "CORPUS_SCHEMA",
     "RESULTS_SCHEMA",
+    "AccuracyRow",
     "CaseResult",
     "EngineCaseResult",
     "all_passed",

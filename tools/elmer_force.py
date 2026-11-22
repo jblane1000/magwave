@@ -258,7 +258,7 @@ def _run_elmer_plate_at_z(image: str, z_magnet: float) -> ElmerEnergySolve:
 
     with tempfile.TemporaryDirectory(prefix="magwave-elmer-force-") as tmp:
         workdir = Path(tmp)
-        os.chmod(workdir, 0o777)
+        os.chmod(workdir, 0o777)  # noqa: S103 - required: this host runs userns-remapped Docker, and a 0700 dir cannot even be chdir-ed into by the container (verified for default and --user). Scope is one TemporaryDirectory per run.
         (workdir / "grid.grd").write_text(grd_text, encoding="utf-8")
         (workdir / "case.sif").write_text(sif_text, encoding="utf-8")
         _write_team20_hb_table(workdir / "team20_hb.dat")
@@ -409,7 +409,7 @@ def main() -> int:
     except ElmerUnavailableError as exc:
         print(f"SKIP: {exc}")
         return 3
-    except Exception as exc:  # noqa: BLE001 - report verbatim failure
+    except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
