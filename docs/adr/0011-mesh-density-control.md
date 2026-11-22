@@ -12,7 +12,7 @@
 
 As documented in [ADR 0007](0007-tier1-formulation.md) §B.5, evaluating `examples/steel-cylinder-solenoid-nonlinear.json` at that implicit default (`h = 2.5e-3` m, `2 958` nodes / `5 676` elements) gave `Bz(0, 0, 0) = 0.14049244777644335 T` — `2.32 %` below Elmer `MagnetoDynamics2D` (`0.143836 T`). Refining the same geometry resolved the discrepancy to well under `0.1 %`, proving the gap was mesh density rather than physics.
 
-Note on scope: `examples/magnet-n42-air.json` is an N42 permanent-magnet cylinder whose expected values (`Bz(0, 0, 0) = 0.9250100940070316 T`) are regression snapshots captured at the default mesh. Its `mesh` block stays absent so those regression expectations and the bit-identical default path remain intact.
+Note on scope: `examples/magnet-n42-air.json` is an N42 permanent-magnet cylinder whose expected values (`Bz(0, 0, 0) = 0.9250100940070316 T`) are regression snapshots captured at the default mesh. Its `mesh` block stays absent so those regression expectations and the default path that stays bit-identical on a given environment remain intact. Across environments the default path agrees to 1.5e-16 relative at most; CI run 45030178555 computed `Bz(0, 0, 0) = 0.1404924477764435 T` where this checkout computes `0.14049244777644335 T`, which is why the regression assertion uses `math.isclose(rel_tol=1e-12)` rather than exact equality.
 
 All measured numbers below were recorded on 2026-11-22 in this checkout using `env -u PYTHONPATH .venv/bin/python` (Python 3.12.3, NumPy, SciPy).
 
@@ -32,7 +32,7 @@ Changing `Fem2dEngine`'s implicit default from `l_max / 40` (for example to `l_m
 1. One global ratio cannot be right for all geometries: a coarse thick coil in air converges well at `l_max / 40`, whereas a saturating steel cylinder inside a winding needs `1 mm` elements and curved spheres or thin air gaps need problem-specific resolution.
 2. Raising the global default silently changes the meshes and probe values of every case that omits `mesh`, breaking the regression snapshots in `examples/magnet-n42-air.json` and `examples/magnet-n42-keeper.json` and mutating existing `fem2d` outputs.
 
-Keeping `l_max / 40` untouched when `case.mesh is None` and `--element-size` is omitted preserves bit-identical behaviour on all existing benchmarks and regression cases, while putting `"mesh": {"element_size": ...}` in the case document makes the chosen discretisation explicit, version-controlled, and reproducible.
+Keeping `l_max / 40` untouched when `case.mesh is None` and `--element-size` is omitted preserves bit-identical behaviour on all existing benchmarks and regression cases on the same environment (within 1e-12 relative across different NumPy/BLAS builds), while putting `"mesh": {"element_size": ...}` in the case document makes the chosen discretisation explicit, version-controlled, and reproducible.
 
 ### 3. CLI surface (`--element-size`, `solve --engine fem2d`, `converge`) and precedence
 
@@ -100,9 +100,9 @@ converged: YES
 
 At `h = 0.001 m`, the 3-rung Richardson discretisation error estimate reported by `converge` is `1.161074e-03 T` (`0.8068 % <= 1.000 %`, `observed order p = 1.2514`, `converged: YES`).
 
-## Bit-Identical Default Path
+## Bit-Identical Default Path (Same Environment, 1e-12 Across Environments)
 
-- **Absent `mesh` preserves default outputs byte-for-byte.** With no `"mesh"` block and no `--element-size` flag, `Fem2dEngine` retains `self._version` (`+m5.4c`) and computes the exact `b0b8511` results (`Bz(0, 0, 0) = 0.14049244777644335 T`, `2 958` nodes / `5 676` elements on the un-meshed steel case), `examples/magnet-n42-air.json` keeps `"mesh"` absent, and every un-meshed example round-trips cleanly. -- enforced-by: tests/test_m55_mesh_density.py::test_default_path_bit_identical_and_examples_roundtrip
+- **Absent `mesh` preserves default outputs byte-for-byte.** With no `"mesh"` block and no `--element-size` flag, `Fem2dEngine` retains `self._version` (`+m5.4c`) and computes the exact `b0b8511` results (`Bz(0, 0, 0) = 0.14049244777644335 T`, `2 958` nodes / `5 676` elements on the un-meshed steel case), `examples/magnet-n42-air.json` keeps `"mesh"` absent, and every un-meshed example round-trips cleanly, while probe floats agree only to 1e-12 relative across environments (CI run 45030178555: `0.1404924477764435` vs `0.14049244777644335` locally, 1.5e-16 relative); the `2 958` / `5 676` integer counts are exact everywhere. -- enforced-by: tests/test_m55_mesh_density.py::test_default_path_bit_identical_and_examples_roundtrip
 
 ## Consequences
 

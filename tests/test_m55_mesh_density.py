@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -404,6 +405,7 @@ def test_solve_fem2d_probe_output_and_sampling_refusal(
 def test_default_path_bit_identical_and_examples_roundtrip(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """Default path is bit-identical on a given environment and within 1e-12 relative across them."""
     steel_doc = json.loads(STEEL_EXAMPLE.read_text(encoding="utf-8"))
     assert steel_doc["mesh"] == {"element_size": 0.001}
     steel_doc.pop("mesh")
@@ -414,7 +416,14 @@ def test_default_path_bit_identical_and_examples_roundtrip(
     cap_report = capsys.readouterr()
     assert rc_report == 0, cap_report.err
     payload = _extract_final_json(cap_report.out)
-    assert payload["probes"][0]["computed"] == 0.14049244777644335
+    # The float64 sparse solve diverges in the last bit across NumPy/BLAS builds: CI run
+    # 45030178555 computes 0.1404924477764435 here while this checkout computes
+    # 0.14049244777644335 (1.5e-16 relative). Exact equality would assert the environment, not
+    # the code. The integer counts below stay exact: mesh topology is deterministic and is the
+    # real bit-identity evidence.
+    assert math.isclose(
+        payload["probes"][0]["computed"], 0.14049244777644335, rel_tol=1e-12, abs_tol=1e-15
+    )
     assert payload["convergence"]["nodes"] == 2958
     assert payload["convergence"]["elements"] == 5676
 
