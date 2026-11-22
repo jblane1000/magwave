@@ -8,6 +8,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **M5.5 — Per-case mesh density control (`mesh.element_size`), `--element-size`, and `converge`**:
+  added frozen `MeshSpec(element_size)` and optional trailing `Case.mesh` to `magwave.case/1`
+  (`src/magwave/cases.py`, omitted from `Case.to_dict()` when `None`, strict `_keys` and
+  positive-finite validation refusing `bool`, non-finite, `<= 0`, and unknown keys without
+  clamping); added global `--element-size METRES` (validated before command/engine coupling with
+  exit `1`, precedence `--element-size` > `case.mesh.element_size` > engine default),
+  `solve --engine fem2d` direct case-probe output (refusing `--grid`/`--points` with exit `2`),
+  and `magwave converge` (`src/magwave/converge.py`, Richardson order `p` and discretisation error
+  on uniform ladders, honest `not estimable` on two-rung/non-uniform ladders, and `WARNING` on
+  non-falling deltas); set `"mesh": {"element_size": 0.001}` on
+  `examples/steel-cylinder-solenoid-nonlinear.json` as the coarsest rung within `1 %` of Elmer
+  (`Bz(0, 0, 0) = 0.14391693899251826 T`, `8 478` nodes / `16 536` elements, `0.0563 %` vs Elmer
+  `0.143836 T`, 3-rung Richardson error `0.8068 %` at `p = 1.2514`), leaving
+  `examples/magnet-n42-air.json` and the default solver path bit-identical (`docs/adr/0011-mesh-density-control.md`).
 - **M5.4c — Cell-aligned virtual-work shift (`+m5.4c`)**:
   enforced exact cell-aligned virtual displacements (`delta = k * h`, integer `k >= 1`) in
   `magwave.fem2d.force.coenergy_force`, refusing sub-cell/non-aligned steps with

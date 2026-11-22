@@ -7,13 +7,15 @@ Implemented:
   ``benchmarks/checks.py`` produce the numbers; with ``--engine magpylib`` the same cases,
   expected values and tolerances are evaluated through the Tier 0 engine, and cases the
   engine cannot model are reported as ``SKIP: <CODE>: <reason>``.
-* ``magwave solve CASE.json --format csv|json (--grid SPEC | --points SPEC)`` — samples B
-  with the Tier 0 engine and prints the samples with units, engine id, version and rung
-  (FR-050). Exit 2 on a malformed case or one the engine cannot model.
-* ``magwave report CASE.json [--engine magpylib] [--out PATH|-]`` — evaluates a case and
-  writes a deterministic Markdown report with provenance, probe table, corpus comparison,
-  and a final JSON block (FR-053). Exit 1 if the case fails to load or the engine refuses
-  it.
+* ``magwave solve CASE.json [--engine magpylib|fem2d] [--element-size METRES] ...`` —
+  samples B on a grid/points with Tier 0 (FR-050), or evaluates the case probes with Tier 1
+  ``fem2d``. Exit 2 on a malformed case or one the engine cannot model.
+* ``magwave report CASE.json [--engine magpylib|fem2d] [--element-size METRES] [--out PATH|-]`` —
+  evaluates a case and writes a deterministic Markdown report with provenance, probe table,
+  corpus comparison, and a final JSON block (FR-053). Exit 1 if the case fails to load or
+  the engine refuses it.
+* ``magwave converge CASE.json [--engine fem2d] [--sizes H1,H2,...] [--element-size METRES]`` —
+  runs a mesh-refinement ladder on ``fem2d`` and reports observed order and Richardson error.
 * ``magwave gui [CASE.json]`` — opens the optional PySide6 + PyVista desktop UI with an
   optional case JSON file (FR-061). Exit 1 with install instructions if the ``gui`` extra
   is not installed.
@@ -30,6 +32,7 @@ import argparse
 import json
 import math
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -49,19 +52,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "command",
         nargs="?",
-        help="command to run (bench, solve, report, gui, import; run/validate/export are not implemented yet)",
+        help=(
+            "command to run (bench, solve, report, converge, gui, import; "
+            "run/validate/export are not implemented yet)"
+        ),
     )
     parser.add_argument(
         "case",
         nargs="?",
         default=None,
-        help="solve/report/gui/import: path to a case JSON or CAD file",
+        help="solve/report/converge/gui/import: path to a case JSON or CAD file",
     )
     parser.add_argument(
         "--json",
         metavar="PATH",
         default=None,
-        help="bench/import: write the results or manifest as JSON to PATH",
+        help="bench/converge/import: write the results or manifest as JSON to PATH",
     )
     parser.add_argument(
         "--role",
@@ -81,7 +87,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--engine",
         choices=ENGINES,
         default=None,
-        help="bench/report: evaluate with this engine (default for report: magpylib)",
+        help="bench/solve/report/converge: evaluate with this engine (default: magpylib, fem2d for converge)",
+    )
+    parser.add_argument(
+        "--element-size",
+        metavar="METRES",
+        default=None,
+        help="solve/report/converge --engine fem2d: override mesh element size in metres",
+    )
+    parser.add_argument(
+        "--sizes",
+        metavar="H1,H2,...",
+        default=None,
+        help="converge: comma-separated strictly decreasing element sizes in metres (at least 2)",
     )
     parser.add_argument(
         "--report-accuracy",
@@ -93,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         type=int,
         default=None,
-        help="bench/report --engine fem2d: maximum nonlinear Newton iterations",
+        help="bench/solve/report/converge --engine fem2d: maximum nonlinear Newton iterations",
     )
     parser.add_argument(
         "--out",
@@ -190,7 +208,13 @@ def _run_engine_bench(
     return 0 if engine_all_passed(rows) else 1
 
 
-def _make_engine(name: str, *, max_iterations: int | None = None, material_model: str = "linear"):
+def _make_engine(
+    name: str,
+    *,
+    element_size: float | None = None,
+    max_iterations: int | None = None,
+    material_model: str = "linear",
+):
     if name == "magpylib":
         from .engines.magpylib_engine import MagpylibEngine
 
@@ -199,10 +223,55 @@ def _make_engine(name: str, *, max_iterations: int | None = None, material_model
         from .fem2d.engine import Fem2dEngine
 
         kwargs: dict[str, object] = {"material_model": material_model}
+        if element_size is not None:
+            kwargs["element_size"] = element_size
         if max_iterations is not None:
             kwargs["max_iterations"] = max_iterations
         return Fem2dEngine(**kwargs)  # type: ignore[arg-type]
     raise ValueError(f"unknown engine {name!r}")  # pragma: no cover - argparse choices
+
+
+def _detect_fem2d_material_model(case) -> str:
+    """Return ``'nonlinear'`` when all permeable components carry B-H curves without overrides."""
+    from .cases import Permeable
+
+    permeables = [comp for comp in case.components if isinstance(comp, Permeable)]
+    if permeables and all(comp.mu_r is None for comp in permeables):
+        from .materials import load_library
+
+        lib = load_library()
+        if all(lib.get(comp.material).bh_table is not None for comp in permeables):
+            return "nonlinear"
+    return "linear"
+
+
+def _resolve_element_size(case, cli_element_size: float | None) -> float | None:
+    """Return ``--element-size`` if given, else ``case.mesh.element_size``, else ``None``."""
+    if cli_element_size is not None:
+        return cli_element_size
+    if case.mesh is not None:
+        return case.mesh.element_size
+    return None
+
+
+def _load_case_for_cli(case_path: str, command: str):
+    """Read, parse, and validate manifest assignments for ``case_path``."""
+    from .cases import Case, CaseError
+
+    try:
+        case = Case.from_json(Path(case_path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, CaseError) as exc:
+        print(f"magwave {command}: {case_path}: {_one_line(exc)}", file=sys.stderr)
+        return None
+    if case.manifest is not None:
+        from .cad.roles import UnassignedBodiesError, require_all_assigned
+
+        try:
+            require_all_assigned(case.manifest)
+        except UnassignedBodiesError as exc:
+            print(f"magwave {command}: {_one_line(exc)}", file=sys.stderr)
+            return None
+    return case
 
 
 # --------------------------------------------------------------------------------------
@@ -327,6 +396,54 @@ def _run_solve(case_path: str, points: np.ndarray, output_format: str) -> int:
     return 0
 
 
+def _run_solve_fem2d(
+    case_path: str,
+    *,
+    element_size: float | None = None,
+    max_iterations: int | None = None,
+) -> int:
+    from .engines.base import EngineError, errors_in
+
+    case = _load_case_for_cli(case_path, "solve")
+    if case is None:
+        return 2
+    material_model = _detect_fem2d_material_model(case)
+    effective_size = _resolve_element_size(case, element_size)
+    engine = _make_engine(
+        "fem2d",
+        element_size=effective_size,
+        max_iterations=max_iterations,
+        material_model=material_model,
+    )
+    problems = engine.validate(case)
+    errors = errors_in(problems)
+    if errors:
+        capabilities = engine.capabilities()
+        print(
+            f"magwave solve: engine {capabilities.engine_id} {capabilities.engine_version} "
+            f"cannot solve case {case.name!r}:",
+            file=sys.stderr,
+        )
+        for problem in errors:
+            print(f"  {problem}", file=sys.stderr)
+        return 2
+    for problem in problems:
+        print(f"magwave solve: {problem}", file=sys.stderr)
+    try:
+        result = engine.solve(case)
+    except EngineError as exc:
+        print(f"magwave solve: {_one_line(exc)}", file=sys.stderr)
+        return 2
+    for index, (probe, sample) in enumerate(zip(case.probes, result.samples, strict=True)):
+        point_text = ", ".join(repr(float(coord)) for coord in probe.point)
+        value = float(result.value(index, probe.component))
+        print(
+            f"probe #{index} ({point_text}) m  {probe.quantity}  {probe.component} = "
+            f"{value!r} {sample.unit}"
+        )
+    return 0
+
+
 # --------------------------------------------------------------------------------------
 # report
 # --------------------------------------------------------------------------------------
@@ -339,35 +456,27 @@ def _run_report(
     engine_name: str,
     out_path: str | None,
     *,
+    element_size: float | None = None,
     max_iterations: int | None = None,
 ) -> int:
-    from .cases import Case, CaseError, Permeable
+    from .cases import CaseError
     from .engines.base import EngineError
     from .report import render_report
 
-    try:
-        case = Case.from_json(Path(case_path).read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, CaseError) as exc:
-        print(f"magwave report: {case_path}: {_one_line(exc)}", file=sys.stderr)
+    case = _load_case_for_cli(case_path, "report")
+    if case is None:
         return 1
-    if case.manifest is not None:
-        from .cad.roles import UnassignedBodiesError, require_all_assigned
-
-        try:
-            require_all_assigned(case.manifest)
-        except UnassignedBodiesError as exc:
-            print(f"magwave report: {_one_line(exc)}", file=sys.stderr)
-            return 1
     material_model = "linear"
+    effective_size: float | None = None
     if engine_name == "fem2d":
-        permeables = [comp for comp in case.components if isinstance(comp, Permeable)]
-        if permeables and all(comp.mu_r is None for comp in permeables):
-            from .materials import load_library
-
-            lib = load_library()
-            if all(lib.get(comp.material).bh_table is not None for comp in permeables):
-                material_model = "nonlinear"
-    engine = _make_engine(engine_name, max_iterations=max_iterations, material_model=material_model)
+        material_model = _detect_fem2d_material_model(case)
+        effective_size = _resolve_element_size(case, element_size)
+    engine = _make_engine(
+        engine_name,
+        element_size=effective_size,
+        max_iterations=max_iterations,
+        material_model=material_model,
+    )
     try:
         markdown = render_report(case, engine, case_file=case_path)
     except (EngineError, CaseError) as exc:
@@ -382,6 +491,94 @@ def _run_report(
     except OSError as exc:
         print(f"magwave report: {out_path}: {_one_line(exc)}", file=sys.stderr)
         return 1
+    return 0
+
+
+# --------------------------------------------------------------------------------------
+# converge
+# --------------------------------------------------------------------------------------
+def _run_converge(
+    case_path: str,
+    *,
+    sizes: tuple[float, ...] | None = None,
+    element_size: float | None = None,
+    max_iterations: int | None = None,
+    json_path: str | None = None,
+) -> int:
+    from .converge import (
+        ConvergenceRung,
+        analyse_ladder,
+        convergence_payload,
+        format_convergence_table,
+        probe_column_header,
+    )
+    from .engines.base import EngineError
+    from .fem2d.engine import default_element_size
+
+    case = _load_case_for_cli(case_path, "converge")
+    if case is None:
+        return 1
+    if sizes is None:
+        base_h = (
+            element_size
+            if element_size is not None
+            else (case.mesh.element_size if case.mesh is not None else default_element_size(case))
+        )
+        sizes = (4.0 * base_h, 2.0 * base_h, base_h)
+
+    material_model = _detect_fem2d_material_model(case)
+    rungs: list[ConvergenceRung] = []
+    probe_headers: tuple[str, ...] | None = None
+    for size in sizes:
+        engine = _make_engine(
+            "fem2d",
+            element_size=size,
+            max_iterations=max_iterations,
+            material_model=material_model,
+        )
+        try:
+            result = engine.solve(case)
+        except (EngineError, ValueError) as exc:
+            print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
+            return 1
+        conv = result.convergence
+        if conv is None:  # pragma: no cover - Fem2dEngine always populates convergence
+            print("magwave converge: engine did not return mesh statistics", file=sys.stderr)
+            return 1
+        if probe_headers is None:
+            probe_headers = tuple(
+                probe_column_header(index, probe, sample.unit)
+                for index, (probe, sample) in enumerate(
+                    zip(case.probes, result.samples, strict=True)
+                )
+            )
+        values = tuple(
+            float(result.value(index, probe.component)) for index, probe in enumerate(case.probes)
+        )
+        units = tuple(sample.unit for sample in result.samples)
+        rungs.append(
+            ConvergenceRung(
+                element_size=float(size),
+                nodes=int(conv.nodes),
+                elements=int(conv.elements),
+                probe_values=values,
+                probe_units=units,
+            )
+        )
+
+    assert probe_headers is not None
+    try:
+        study = analyse_ladder(case.name, probe_headers, rungs)
+    except ValueError as exc:
+        print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
+        return 1
+    sys.stdout.write(format_convergence_table(study))
+    if json_path is not None:
+        try:
+            _write_json(json_path, convergence_payload(study))
+        except OSError as exc:
+            print(f"magwave converge: {json_path}: {_one_line(exc)}", file=sys.stderr)
+            return 1
     return 0
 
 
@@ -508,29 +705,123 @@ def _run_import(
 # --------------------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------------------
+def _attach_value_flags(argv: Sequence[str], flags: tuple[str, ...]) -> list[str]:
+    """Rewrite ``['--flag', '-1']`` as ``['--flag=-1']`` so negative values reach validators."""
+    out: list[str] = []
+    idx = 0
+    while idx < len(argv):
+        token = argv[idx]
+        if token in flags and idx + 1 < len(argv):
+            nxt = argv[idx + 1]
+            if nxt.startswith("-") and not nxt.startswith("--") and nxt != "-h":
+                out.append(f"{token}={nxt}")
+                idx += 2
+                continue
+        out.append(token)
+        idx += 1
+    return out
+
+
+def _parse_element_size(raw: object) -> float:
+    if isinstance(raw, bool):
+        raise ValueError(f"--element-size: must be a finite number > 0, got {raw!r}")
+    text = str(raw).strip()
+    if not text or text.lower() in ("true", "false"):
+        raise ValueError(f"--element-size: must be a finite number > 0, got {raw!r}")
+    try:
+        val = float(text)
+    except ValueError as exc:
+        raise ValueError(f"--element-size: must be a finite number > 0, got {raw!r}") from exc
+    if not math.isfinite(val) or val <= 0.0:
+        raise ValueError(f"--element-size: must be a finite number > 0, got {raw!r}")
+    return val
+
+
+def _parse_sizes(spec: str) -> tuple[float, ...]:
+    raw_parts = [part.strip() for part in spec.split(",")]
+    if not raw_parts or any(not part for part in raw_parts):
+        raise ValueError(f"--sizes: expected comma-separated positive numbers, got {spec!r}")
+    values: list[float] = []
+    for part in raw_parts:
+        if part.lower() in ("true", "false"):
+            raise ValueError(f"--sizes: must be a finite number > 0, got {part!r}")
+        try:
+            val = float(part)
+        except ValueError as exc:
+            raise ValueError(f"--sizes: not a number in {part!r} (from {spec!r})") from exc
+        if not math.isfinite(val) or val <= 0.0:
+            raise ValueError(f"--sizes: must be a finite number > 0, got {part!r}")
+        values.append(val)
+    if len(values) < 2:
+        raise ValueError(f"--sizes: at least 2 element sizes are required, got {spec!r}")
+    for prev, curr in zip(values, values[1:], strict=False):
+        if curr >= prev:
+            raise ValueError(
+                f"--sizes: values must be strictly decreasing ({prev!r} followed by {curr!r})"
+            )
+    return tuple(values)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_intermixed_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    normalized_argv = _attach_value_flags(raw_argv, ("--element-size", "--sizes"))
+    args = parser.parse_intermixed_args(normalized_argv)
+
+    # Validate --element-size value first, before any command/engine coupling check.
+    element_size: float | None = None
+    if args.element_size is not None:
+        try:
+            element_size = _parse_element_size(args.element_size)
+        except ValueError as exc:
+            print(f"magwave: {_one_line(exc)}", file=sys.stderr)
+            return 1
+
     if args.command is None:
+        if element_size is not None or args.sizes is not None:
+            parser.error("--element-size and --sizes require a command")
         print(f"magwave {__version__} — M1 skeleton. See docs/PRD.md.")
         return 0
     if args.out is not None and args.command != "report":
         parser.error(f"{args.command}: --out applies to report only")
-    if args.command not in ("solve", "report", "gui", "import") and args.case is not None:
-        parser.error(f"{args.command}: case path applies to solve, report, gui and import")
+    if (
+        args.command not in ("solve", "report", "converge", "gui", "import")
+        and args.case is not None
+    ):
+        parser.error(
+            f"{args.command}: case path applies to solve, report, converge, gui and import"
+        )
     if args.command != "solve" and (args.grid or args.points or args.format):
         parser.error(f"{args.command}: --format, --grid and --points apply to solve")
     if args.command != "import" and args.role:
         parser.error(f"{args.command}: --role applies to import only")
     if args.command != "import" and args.defeature_below is not None:
         parser.error(f"{args.command}: --defeature-below applies to import only")
+    if args.command != "converge" and args.sizes is not None:
+        parser.error(f"{args.command}: --sizes applies to converge only")
     if args.report_accuracy and (args.command != "bench" or args.engine is None):
         parser.error("--report-accuracy is valid only together with bench --engine")
+
+    if element_size is not None:
+        effective_engine = (args.engine or "fem2d") if args.command == "converge" else args.engine
+        if args.command not in ("solve", "report", "converge") or effective_engine != "fem2d":
+            parser.error(
+                "--element-size applies only to solve, report and converge with --engine fem2d"
+            )
+
     if args.max_iterations is not None:
-        if args.command not in ("bench", "report") or args.engine != "fem2d":
-            parser.error("--max-iterations is valid only with bench or report and --engine fem2d")
+        effective_engine = (args.engine or "fem2d") if args.command == "converge" else args.engine
+        if (
+            args.command not in ("bench", "solve", "report", "converge")
+            or effective_engine != "fem2d"
+        ):
+            parser.error(
+                "--max-iterations is valid only with bench, solve, report or converge "
+                "and --engine fem2d"
+            )
         if args.max_iterations < 1:
             parser.error("--max-iterations must be a positive integer (>= 1)")
+
     if args.command == "bench":
         if args.engine is None:
             return _run_bench(args.json)
@@ -543,8 +834,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "solve":
         if args.case is None:
             parser.error("solve: a case JSON path is required")
-        if args.json or args.engine:
-            parser.error("solve: --json and --engine apply to bench only")
+        if args.json:
+            parser.error("solve: --json applies to bench or converge only")
+        engine_name = args.engine or "magpylib"
+        if engine_name == "fem2d":
+            if args.grid is not None or args.points is not None:
+                print(
+                    "magwave solve: --grid and --points are not supported with --engine fem2d "
+                    "(Fem2dEngine has no point sampler; omit --grid/--points to evaluate case probes)",
+                    file=sys.stderr,
+                )
+                return 2
+            if args.format is not None:
+                print(
+                    "magwave solve: --format is not supported with --engine fem2d",
+                    file=sys.stderr,
+                )
+                return 2
+            return _run_solve_fem2d(
+                args.case,
+                element_size=element_size,
+                max_iterations=args.max_iterations,
+            )
         if (args.grid is None) == (args.points is None):
             parser.error("solve: exactly one of --grid or --points is required")
         try:
@@ -562,7 +873,32 @@ def main(argv: list[str] | None = None) -> int:
             args.case,
             args.engine or "magpylib",
             args.out,
+            element_size=element_size,
             max_iterations=args.max_iterations,
+        )
+    if args.command == "converge":
+        if args.engine == "magpylib":
+            parser.error(
+                "converge: --engine magpylib is not supported (Tier 0 has no mesh); "
+                "use --engine fem2d"
+            )
+        if args.case is None:
+            parser.error("converge: a case JSON path is required")
+        if args.sizes is not None and element_size is not None:
+            parser.error("converge: --element-size and --sizes cannot be combined")
+        parsed_sizes: tuple[float, ...] | None = None
+        if args.sizes is not None:
+            try:
+                parsed_sizes = _parse_sizes(args.sizes)
+            except ValueError as exc:
+                print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
+                return 1
+        return _run_converge(
+            args.case,
+            sizes=parsed_sizes,
+            element_size=element_size,
+            max_iterations=args.max_iterations,
+            json_path=args.json,
         )
     if args.command == "gui":
         if args.json or args.engine:

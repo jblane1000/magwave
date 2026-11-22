@@ -24,6 +24,7 @@ byte-identical. Unknown keys are rejected at every level.
       "schema": "magwave.case/1",
       "sources": ["<provenance>", ...],
       "tolerance": <relative>                # must equal the tightest expected tolerance
+      [, "mesh": {"element_size": <metres>}] # optional FEM element size in metres
       [, "temperature_c": <deg C>]           # optional operating temperature (omitted when null or 20.0)
     }
 
@@ -140,6 +141,17 @@ def _number(value: Any, where: str) -> float:
     if not math.isfinite(out):
         _fail(where, "must be finite")
     return out
+
+
+def _positive_finite_size(value: Any, where: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(float(value))
+        or float(value) <= 0.0
+    ):
+        _fail(where, f"must be a finite number > 0, got {value!r}")
+    return float(value)
 
 
 def _triple(value: Any, where: str) -> tuple[float, float, float]:
@@ -569,8 +581,29 @@ class ExpectedValue:
 
 
 # --------------------------------------------------------------------------------------
-# the case
+# mesh control and the case
 # --------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class MeshSpec:
+    """Per-case FEM mesh density control (metres)."""
+
+    element_size: float
+
+    def __post_init__(self) -> None:
+        size = _positive_finite_size(self.element_size, "mesh.element_size")
+        object.__setattr__(self, "element_size", size)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"element_size": self.element_size}
+
+    @classmethod
+    def from_dict(cls, data: Any, where: str = "mesh") -> MeshSpec:
+        doc = _mapping(data, where)
+        _keys(doc, where, ("element_size",))
+        size = _positive_finite_size(doc["element_size"], f"{where}.element_size")
+        return cls(element_size=size)
+
+
 @dataclass(frozen=True)
 class Case:
     """A complete, reproducible benchmark or user case.
@@ -589,6 +622,7 @@ class Case:
     tolerance: float | None = None
     manifest: Manifest | None = None
     temperature_c: float | None = None
+    mesh: MeshSpec | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _text(self.name, "case.name"))
@@ -662,6 +696,9 @@ class Case:
                 )
             object.__setattr__(self, "temperature_c", temp)
 
+        if self.mesh is not None and not isinstance(self.mesh, MeshSpec):
+            _fail("case.mesh", f"expected MeshSpec or None, got {type(self.mesh).__name__}")
+
     def to_dict(self) -> dict[str, Any]:
         """Return the case as a JSON-ready dict with keys sorted at every level."""
         payload: dict[str, Any] = {
@@ -676,6 +713,8 @@ class Case:
         }
         if self.manifest is not None:
             payload["manifest"] = self.manifest.to_dict()
+        if self.mesh is not None:
+            payload["mesh"] = self.mesh.to_dict()
         if self.temperature_c is not None and self.temperature_c != 20.0:
             payload["temperature_c"] = self.temperature_c
         return _sorted(payload)
@@ -688,7 +727,7 @@ class Case:
             doc,
             "case",
             ("schema", "name", "description", "sources", "components", "probes", "expected"),
-            ("tolerance", "manifest", "temperature_c"),
+            ("tolerance", "manifest", "temperature_c", "mesh"),
         )
         schema = _text(doc["schema"], "case.schema")
         if schema != SCHEMA:
@@ -709,6 +748,10 @@ class Case:
                 manifest = Manifest.from_dict(raw_manifest)
             except ValueError as exc:
                 _fail("case.manifest", str(exc))
+        raw_mesh = doc.get("mesh")
+        mesh: MeshSpec | None = None
+        if raw_mesh is not None:
+            mesh = MeshSpec.from_dict(raw_mesh, "case.mesh")
         return cls(
             name=doc["name"],
             description=doc["description"],
@@ -727,6 +770,7 @@ class Case:
             tolerance=doc.get("tolerance"),
             manifest=manifest,
             temperature_c=doc.get("temperature_c"),
+            mesh=mesh,
         )
 
     def to_json(self, indent: int = 2) -> str:
