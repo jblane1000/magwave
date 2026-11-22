@@ -376,4 +376,4 @@ geometry, and it is larger than the `3 %` Elmer gate only because that gate is a
 
 **Follow-up (not done in M5.2):** expose mesh density control in the case schema and CLI (e.g. a
 per-case `mesh.element_size` / refinement level) so the shipped examples solve at a documented,
-reproducible resolution instead of an implicit default.
+reproducible resolution instead of an implicit default. Resolved in M5.5 by [ADR 0011](0011-mesh-density-control.md).

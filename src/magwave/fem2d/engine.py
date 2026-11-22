@@ -71,6 +71,82 @@ def _effective_temperature_c(case: Case) -> float:
     return 20.0 if case.temperature_c is None else float(case.temperature_c)
 
 
+def _case_geometry_bounds(
+    case: Case,
+) -> tuple[list[float], list[float], float, float, float, float, float]:
+    """Return ``(r_breaks, z_breaks, max_outer_radius, min_z1, max_z2, l_max, min_sphere_radius)``."""
+    r_breaks: list[float] = []
+    z_breaks: list[float] = []
+    max_outer_radius = 0.0
+    min_z1 = math.inf
+    max_z2 = -math.inf
+    l_max = 0.0
+    min_sphere_radius = math.inf
+
+    for component in case.components:
+        if isinstance(component, Coil):
+            r_in = component.dims["inner_radius"]
+            r_out = component.dims["outer_radius"]
+            length = component.dims["length"]
+            z1 = component.center[2] - 0.5 * length
+            z2 = component.center[2] + 0.5 * length
+            r_breaks.extend((r_in, r_out))
+            z_breaks.extend((z1, z2))
+            max_outer_radius = max(max_outer_radius, r_out)
+            min_z1 = min(min_z1, z1)
+            max_z2 = max(max_z2, z2)
+            l_max = max(l_max, r_out, length)
+        elif isinstance(component, Magnet):
+            r_out = component.dims["radius"]
+            length = component.dims["length"]
+            z1 = component.center[2] - 0.5 * length
+            z2 = component.center[2] + 0.5 * length
+            r_breaks.append(r_out)
+            z_breaks.extend((z1, z2))
+            max_outer_radius = max(max_outer_radius, r_out)
+            min_z1 = min(min_z1, z1)
+            max_z2 = max(max_z2, z2)
+            l_max = max(l_max, r_out, length)
+        elif isinstance(component, Permeable):
+            rc = math.hypot(component.center[0], component.center[1])
+            zc = component.center[2]
+            if component.kind == "sphere":
+                rad = component.dims["radius"]
+                r_breaks.extend((rc - rad, rc + rad))
+                z_breaks.extend((zc - rad, zc + rad))
+                max_outer_radius = max(max_outer_radius, rc + rad)
+                min_z1 = min(min_z1, zc - rad)
+                max_z2 = max(max_z2, zc + rad)
+                l_max = max(l_max, rc + rad, 2.0 * rad)
+                min_sphere_radius = min(min_sphere_radius, rad)
+            elif component.kind == "cylinder":
+                rad = component.dims["radius"]
+                length = component.dims["length"]
+                z1 = zc - 0.5 * length
+                z2 = zc + 0.5 * length
+                r_breaks.extend((rc - rad, rc + rad))
+                z_breaks.extend((z1, z2))
+                max_outer_radius = max(max_outer_radius, rc + rad)
+                min_z1 = min(min_z1, z1)
+                max_z2 = max(max_z2, z2)
+                l_max = max(l_max, rc + rad, length)
+
+    return r_breaks, z_breaks, max_outer_radius, min_z1, max_z2, l_max, min_sphere_radius
+
+
+def default_element_size(case: Case) -> float:
+    """Return the implicit default ``Fem2dEngine`` element size (metres) for ``case``."""
+    _, _, _, _, _, l_max, min_sphere_radius = _case_geometry_bounds(case)
+    if l_max == 0.0:
+        probe_r = max((math.hypot(p.point[0], p.point[1]) for p in case.probes), default=0.0)
+        probe_z = [p.point[2] for p in case.probes] or [0.0]
+        l_max = max(probe_r, max(probe_z) - min(probe_z), 0.1)
+    h = l_max / 40.0
+    if math.isfinite(min_sphere_radius):
+        h = min(h, min_sphere_radius / 40.0)
+    return h
+
+
 def _body_rz_box(component: Magnet | Permeable) -> tuple[float, float, float, float]:
     rc = math.hypot(component.center[0], component.center[1])
     zc = component.center[2]
@@ -547,61 +623,21 @@ class Fem2dEngine:
         self, case: Case
     ) -> tuple[Mesh, np.ndarray, list[tuple[float, float]]]:
         """Construct the graded mesh and assemble volume/sheet loads for ``case``."""
-        r_breaks: list[float] = []
-        z_breaks: list[float] = []
-        max_outer_radius = 0.0
-        min_z1 = math.inf
-        max_z2 = -math.inf
-        l_max = 0.0
-        min_sphere_radius = math.inf
+        (
+            r_breaks,
+            z_breaks,
+            max_outer_radius,
+            min_z1,
+            max_z2,
+            l_max,
+            min_sphere_radius,
+        ) = _case_geometry_bounds(case)
 
-        for component in case.components:
-            if isinstance(component, Coil):
-                r_in = component.dims["inner_radius"]
-                r_out = component.dims["outer_radius"]
-                length = component.dims["length"]
-                z1 = component.center[2] - 0.5 * length
-                z2 = component.center[2] + 0.5 * length
-                r_breaks.extend((r_in, r_out))
-                z_breaks.extend((z1, z2))
-                max_outer_radius = max(max_outer_radius, r_out)
-                min_z1 = min(min_z1, z1)
-                max_z2 = max(max_z2, z2)
-                l_max = max(l_max, r_out, length)
-            elif isinstance(component, Magnet):
-                r_out = component.dims["radius"]
-                length = component.dims["length"]
-                z1 = component.center[2] - 0.5 * length
-                z2 = component.center[2] + 0.5 * length
-                r_breaks.append(r_out)
-                z_breaks.extend((z1, z2))
-                max_outer_radius = max(max_outer_radius, r_out)
-                min_z1 = min(min_z1, z1)
-                max_z2 = max(max_z2, z2)
-                l_max = max(l_max, r_out, length)
-            elif isinstance(component, Permeable):
-                rc = math.hypot(component.center[0], component.center[1])
-                zc = component.center[2]
-                if component.kind == "sphere":
-                    rad = component.dims["radius"]
-                    r_breaks.extend((rc - rad, rc + rad))
-                    z_breaks.extend((zc - rad, zc + rad))
-                    max_outer_radius = max(max_outer_radius, rc + rad)
-                    min_z1 = min(min_z1, zc - rad)
-                    max_z2 = max(max_z2, zc + rad)
-                    l_max = max(l_max, rc + rad, 2.0 * rad)
-                    min_sphere_radius = min(min_sphere_radius, rad)
-                elif component.kind == "cylinder":
-                    rad = component.dims["radius"]
-                    length = component.dims["length"]
-                    z1 = zc - 0.5 * length
-                    z2 = zc + 0.5 * length
-                    r_breaks.extend((rc - rad, rc + rad))
-                    z_breaks.extend((z1, z2))
-                    max_outer_radius = max(max_outer_radius, rc + rad)
-                    min_z1 = min(min_z1, z1)
-                    max_z2 = max(max_z2, z2)
-                    l_max = max(l_max, rc + rad, length)
+        effective_h = (
+            self._element_size
+            if self._element_size is not None
+            else (case.mesh.element_size if case.mesh is not None else None)
+        )
 
         if l_max == 0.0:
             probe_r = max((math.hypot(p.point[0], p.point[1]) for p in case.probes), default=0.0)
@@ -609,11 +645,11 @@ class Fem2dEngine:
             max_outer_radius = probe_r
             min_z1 = min(probe_z)
             max_z2 = max(probe_z)
-            default_len = 10.0 * self._element_size if self._element_size is not None else 0.1
+            default_len = 10.0 * effective_h if effective_h is not None else 0.1
             l_max = max(probe_r, max_z2 - min_z1, default_len)
 
-        if self._element_size is not None:
-            h = self._element_size
+        if effective_h is not None:
+            h = effective_h
         else:
             h = l_max / 40.0
             if math.isfinite(min_sphere_radius):

@@ -44,6 +44,9 @@
       "value": 0.143836
     }
   ],
+  "mesh": {
+    "element_size": 0.001
+  },
   "name": "steel_cylinder_solenoid_nonlinear",
   "probes": [
     {
