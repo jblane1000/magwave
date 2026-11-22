@@ -144,10 +144,10 @@ def test_mesh_spec_refuses_invalid_values_and_unknown_keys(
 
     non_obj_doc = dict(base_doc)
     non_obj_doc["mesh"] = 0.001
-    with pytest.raises(CaseError, match="case.mesh"):
+    with pytest.raises(CaseError, match=r"case\.mesh"):
         Case.from_dict(non_obj_doc)
 
-    with pytest.raises(CaseError, match="mesh.element_size"):
+    with pytest.raises(CaseError, match=r"mesh\.element_size"):
         MeshSpec(element_size=-1.0)
 
 
