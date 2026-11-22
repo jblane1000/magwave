@@ -23,14 +23,14 @@ if sys.platform.startswith("linux") and not (
 pytest.importorskip("PySide6")
 pytest.importorskip("pyvista")
 
-from PySide6 import QtCore, QtWidgets  # noqa: E402
+from PySide6 import QtCore, QtWidgets
 
-from magwave.benchmarks import load_corpus  # noqa: E402
-from magwave.cases import Case, Coil, Dipole, ExpectedValue, Magnet, Probe  # noqa: E402
-from magwave.cli import main  # noqa: E402
-from magwave.engines import MagpylibEngine  # noqa: E402
-from magwave.engines.base import Capabilities, EngineError, Problem, Result  # noqa: E402
-from magwave.gui import (  # noqa: E402
+from magwave.benchmarks import load_corpus
+from magwave.cases import Case, Coil, Dipole, ExpectedValue, Magnet, Probe
+from magwave.cli import main
+from magwave.engines import MagpylibEngine
+from magwave.engines.base import Capabilities, EngineError, Problem, Result
+from magwave.gui import (
     MISSING_GUI_MESSAGE,
     MainWindow,
     Steel,
@@ -38,7 +38,7 @@ from magwave.gui import (  # noqa: E402
     launch_gui,
     with_component,
 )
-from magwave.report import render_report  # noqa: E402
+from magwave.report import render_report
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE = ROOT / "examples" / "solve-dipole.json"

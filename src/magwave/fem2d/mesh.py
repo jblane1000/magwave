@@ -204,7 +204,7 @@ def _build_axis(
         x0 = float(pts[idx])
         x1 = float(pts[idx + 1])
         length = x1 - x0
-        n_steps = max(1, int(math.ceil(length / h - _TOL)))
+        n_steps = max(1, math.ceil(length / h - _TOL))
         segments[idx] = np.linspace(x0, x1, n_steps + 1, dtype=np.float64)
 
     # Grow outward to the left from ref0 toward a_min.

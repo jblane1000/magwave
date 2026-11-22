@@ -197,3 +197,20 @@ def test_mapper_on_this_repository_has_no_dangling_links():
     payload = json.loads(proc.stdout)
     assert payload["dangling"] == []
     assert payload["constraints"] > 0
+
+
+def test_mapper_reads_a_tag_on_a_continuation_line(tmp_path):
+    """A constraint wraps in prose; the tag may sit on the line that continues it."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_y.py").write_text(
+        "def test_wrapped() -> None:\n    pass\n", encoding="utf-8"
+    )
+    _write_adr(
+        tmp_path,
+        "0005-demo.md",
+        "# Demo\n\n- **A long rule that wraps across lines** because the sentence keeps going\n"
+        "  and the enforcement tag ends up here. -- enforced-by: tests/test_y.py::test_wrapped\n",
+    )
+    payload = json.loads(_run([str(MAPPER), "--root", str(tmp_path), "--json"]).stdout)
+    assert payload["enforced"] == 1
+    assert payload["untagged"] == 0
