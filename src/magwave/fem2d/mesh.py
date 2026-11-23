@@ -15,6 +15,30 @@ from dataclasses import dataclass
 import numpy as np
 
 _TOL = 1e-12
+DEFAULT_MAX_NODES: int = 400_000
+
+
+class MeshBudgetError(ValueError):
+    """Raised when the requested mesh resolution exceeds the node budget."""
+
+    def __init__(
+        self,
+        *,
+        nodes: int,
+        nr: int,
+        nz: int,
+        max_nodes: int,
+        element_size: float,
+    ) -> None:
+        self.nodes = int(nodes)
+        self.nr = int(nr)
+        self.nz = int(nz)
+        self.max_nodes = int(max_nodes)
+        self.element_size = float(element_size)
+        super().__init__(
+            f"element_size={self.element_size:g} m requires {self.nodes} nodes "
+            f"({self.nr} x {self.nz}), exceeding max_nodes={self.max_nodes}"
+        )
 
 
 @dataclass(frozen=True)
@@ -173,6 +197,58 @@ def _merge_axis_points(
     return np.array([val for val, _ in merged], dtype=np.float64)
 
 
+def _classify_axis_intervals(
+    pts: np.ndarray, ref0: float, ref1: float
+) -> tuple[list[int], list[int], list[int]]:
+    """Partition interval indices into uniform interior, left exterior, and right exterior."""
+    inside_idx: list[int] = []
+    left_idx: list[int] = []
+    right_idx: list[int] = []
+    for idx in range(len(pts) - 1):
+        x0 = float(pts[idx])
+        x1 = float(pts[idx + 1])
+        if x0 >= ref0 - _TOL and x1 <= ref1 + _TOL:
+            inside_idx.append(idx)
+        elif x1 <= ref0 + _TOL:
+            left_idx.append(idx)
+        else:
+            right_idx.append(idx)
+    return inside_idx, left_idx, right_idx
+
+
+def _count_axis_nodes(
+    a_min: float,
+    a_max: float,
+    ref0: float,
+    ref1: float,
+    breakpoints: list[float],
+    h: float,
+    growth: float,
+) -> int:
+    """Count 1-D axis nodes without allocating interior coordinate arrays."""
+    pts = _merge_axis_points(a_min, a_max, ref0, ref1, breakpoints)
+    inside_idx, left_idx, right_idx = _classify_axis_intervals(pts, ref0, ref1)
+
+    total_steps = 0
+    for idx in inside_idx:
+        length = float(pts[idx + 1]) - float(pts[idx])
+        total_steps += max(1, math.ceil(length / h - _TOL))
+
+    s_curr = h
+    for idx in reversed(left_idx):
+        steps = _geometric_steps(float(pts[idx + 1]) - float(pts[idx]), s_curr, growth)
+        s_curr = float(steps[-1]) * growth
+        total_steps += int(steps.shape[0])
+
+    s_curr = h
+    for idx in right_idx:
+        steps = _geometric_steps(float(pts[idx + 1]) - float(pts[idx]), s_curr, growth)
+        s_curr = float(steps[-1]) * growth
+        total_steps += int(steps.shape[0])
+
+    return total_steps + 1
+
+
 def _build_axis(
     a_min: float,
     a_max: float,
@@ -184,21 +260,8 @@ def _build_axis(
 ) -> np.ndarray:
     """Build 1-D ascending coordinate array with uniform interior and graded exterior."""
     pts = _merge_axis_points(a_min, a_max, ref0, ref1, breakpoints)
-    n_intervals = len(pts) - 1
-    segments: list[np.ndarray | None] = [None] * n_intervals
-
-    inside_idx: list[int] = []
-    left_idx: list[int] = []
-    right_idx: list[int] = []
-    for idx in range(n_intervals):
-        x0 = float(pts[idx])
-        x1 = float(pts[idx + 1])
-        if x0 >= ref0 - _TOL and x1 <= ref1 + _TOL:
-            inside_idx.append(idx)
-        elif x1 <= ref0 + _TOL:
-            left_idx.append(idx)
-        else:
-            right_idx.append(idx)
+    segments: list[np.ndarray | None] = [None] * (len(pts) - 1)
+    inside_idx, left_idx, right_idx = _classify_axis_intervals(pts, ref0, ref1)
 
     for idx in inside_idx:
         x0 = float(pts[idx])
@@ -237,23 +300,30 @@ def _build_axis(
     return np.concatenate(pieces)
 
 
-def rectangular_mesh(
+def _validate_mesh_inputs(
     r_max: float,
     z_min: float,
     z_max: float,
     h: float,
     *,
-    refinement_box: tuple[float, float, float, float] | None = None,
-    breakpoints_r: Sequence[float] = (),
-    breakpoints_z: Sequence[float] = (),
-    growth: float = 1.2,
-    max_nodes: int = 400_000,
-) -> Mesh:
-    """Build a graded axisymmetric tensor-product triangular mesh over ``[0, r_max] x [z_min, z_max]``.
-
-    Raises ``ValueError`` if bounds, step size, growth, breakpoints, or ``max_nodes`` are
-    invalid or exceeded (never silently coarsens).
-    """
+    refinement_box: tuple[float, float, float, float] | None,
+    breakpoints_r: Sequence[float],
+    breakpoints_z: Sequence[float],
+    growth: float,
+    max_nodes: int,
+) -> tuple[
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    list[float],
+    list[float],
+]:
     r_max_f = float(r_max)
     z_min_f = float(z_min)
     z_max_f = float(z_max)
@@ -287,15 +357,159 @@ def rectangular_mesh(
                 f"refinement_box axial bounds ({ref_z0}, {ref_z1}) invalid for [{z_min_f}, {z_max_f}]"
             )
 
+    return r_max_f, z_min_f, z_max_f, h_f, growth_f, ref_r0, ref_r1, ref_z0, ref_z1, bps_r, bps_z
+
+
+def _prepare_rectangular_mesh(
+    r_max: float,
+    z_min: float,
+    z_max: float,
+    h: float,
+    *,
+    refinement_box: tuple[float, float, float, float] | None,
+    breakpoints_r: Sequence[float],
+    breakpoints_z: Sequence[float],
+    growth: float,
+    max_nodes: int,
+) -> tuple[
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    float,
+    list[float],
+    list[float],
+    int,
+    int,
+]:
+    (
+        r_max_f,
+        z_min_f,
+        z_max_f,
+        h_f,
+        growth_f,
+        ref_r0,
+        ref_r1,
+        ref_z0,
+        ref_z1,
+        bps_r,
+        bps_z,
+    ) = _validate_mesh_inputs(
+        r_max,
+        z_min,
+        z_max,
+        h,
+        refinement_box=refinement_box,
+        breakpoints_r=breakpoints_r,
+        breakpoints_z=breakpoints_z,
+        growth=growth,
+        max_nodes=max_nodes,
+    )
+    nr = _count_axis_nodes(0.0, r_max_f, ref_r0, ref_r1, bps_r, h_f, growth_f)
+    nz = _count_axis_nodes(z_min_f, z_max_f, ref_z0, ref_z1, bps_z, h_f, growth_f)
+    total_nodes = nr * nz
+    if total_nodes > max_nodes:
+        raise MeshBudgetError(
+            nodes=total_nodes,
+            nr=nr,
+            nz=nz,
+            max_nodes=max_nodes,
+            element_size=h_f,
+        )
+    return (
+        r_max_f,
+        z_min_f,
+        z_max_f,
+        h_f,
+        growth_f,
+        ref_r0,
+        ref_r1,
+        ref_z0,
+        ref_z1,
+        bps_r,
+        bps_z,
+        nr,
+        nz,
+    )
+
+
+def check_rectangular_mesh_budget(
+    r_max: float,
+    z_min: float,
+    z_max: float,
+    h: float,
+    *,
+    refinement_box: tuple[float, float, float, float] | None = None,
+    breakpoints_r: Sequence[float] = (),
+    breakpoints_z: Sequence[float] = (),
+    growth: float = 1.2,
+    max_nodes: int = DEFAULT_MAX_NODES,
+) -> tuple[int, int]:
+    """Return ``(nr, nz)`` if within ``max_nodes``, else raise :class:`MeshBudgetError`."""
+    *_, nr, nz = _prepare_rectangular_mesh(
+        r_max,
+        z_min,
+        z_max,
+        h,
+        refinement_box=refinement_box,
+        breakpoints_r=breakpoints_r,
+        breakpoints_z=breakpoints_z,
+        growth=growth,
+        max_nodes=max_nodes,
+    )
+    return nr, nz
+
+
+def rectangular_mesh(
+    r_max: float,
+    z_min: float,
+    z_max: float,
+    h: float,
+    *,
+    refinement_box: tuple[float, float, float, float] | None = None,
+    breakpoints_r: Sequence[float] = (),
+    breakpoints_z: Sequence[float] = (),
+    growth: float = 1.2,
+    max_nodes: int = DEFAULT_MAX_NODES,
+) -> Mesh:
+    """Build a graded axisymmetric tensor-product triangular mesh over ``[0, r_max] x [z_min, z_max]``.
+
+    Raises ``MeshBudgetError`` (a ``ValueError`` subclass) if ``max_nodes`` is exceeded, and
+    ``ValueError`` if bounds, step size, growth, or breakpoints are invalid (never silently coarsens).
+    """
+    (
+        r_max_f,
+        z_min_f,
+        z_max_f,
+        h_f,
+        growth_f,
+        ref_r0,
+        ref_r1,
+        ref_z0,
+        ref_z1,
+        bps_r,
+        bps_z,
+        nr,
+        nz,
+    ) = _prepare_rectangular_mesh(
+        r_max,
+        z_min,
+        z_max,
+        h,
+        refinement_box=refinement_box,
+        breakpoints_r=breakpoints_r,
+        breakpoints_z=breakpoints_z,
+        growth=growth,
+        max_nodes=max_nodes,
+    )
+
     r_axis = _build_axis(0.0, r_max_f, ref_r0, ref_r1, bps_r, h_f, growth_f)
     z_axis = _build_axis(z_min_f, z_max_f, ref_z0, ref_z1, bps_z, h_f, growth_f)
-
-    nr = int(r_axis.shape[0])
-    nz = int(z_axis.shape[0])
-    if nr * nz > max_nodes:
-        raise ValueError(
-            f"mesh would require {nr * nz} nodes ({nr} x {nz}), exceeding max_nodes={max_nodes}"
-        )
+    assert int(r_axis.shape[0]) == nr and int(z_axis.shape[0]) == nz
 
     rr, zz = np.meshgrid(r_axis, z_axis, indexing="ij")
     nodes = np.column_stack((rr.ravel(), zz.ravel())).astype(np.float64)

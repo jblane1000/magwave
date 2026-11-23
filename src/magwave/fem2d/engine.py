@@ -35,7 +35,7 @@ from ..materials import (
 from ..units import MU0
 from .assembly import element_geometry, load_current_density, load_sheet
 from .field import sample_field
-from .mesh import Mesh, rectangular_mesh
+from .mesh import Mesh, MeshBudgetError, check_rectangular_mesh_budget, rectangular_mesh
 from .nonlinear import (
     ARMIJO_ALPHA0,
     ARMIJO_C,
@@ -63,6 +63,7 @@ E_UNSUPPORTED_MANIFEST = "E_UNSUPPORTED_MANIFEST"
 E_ACCURACY_UNREACHABLE = "E_ACCURACY_UNREACHABLE"
 E_PROBE_OUTSIDE_DOMAIN = "E_PROBE_OUTSIDE_DOMAIN"
 E_NOT_CONVERGED = "E_NOT_CONVERGED"
+E_MESH_NODE_BUDGET = "E_MESH_NODE_BUDGET"
 
 _AXIS_TOL = 1e-12
 
@@ -601,7 +602,35 @@ class Fem2dEngine:
                         )
                     )
 
-        # 3. Accuracy gate last (only when the case is otherwise solvable).
+        # 3. Mesh node budget check before accuracy gate (only when otherwise solvable).
+        if not any(problem.is_error for problem in problems):
+            (
+                r_max,
+                z_min,
+                z_max,
+                h,
+                ref_box,
+                bps_r,
+                bps_z,
+                _,
+                probe_problems,
+            ) = self._mesh_parameters(case)
+            if not probe_problems:
+                try:
+                    check_rectangular_mesh_budget(
+                        r_max,
+                        z_min,
+                        z_max,
+                        h,
+                        refinement_box=ref_box,
+                        breakpoints_r=bps_r,
+                        breakpoints_z=bps_z,
+                        growth=self._growth,
+                    )
+                except MeshBudgetError as exc:
+                    problems.append(self._mesh_budget_problem(case, exc))
+
+        # 4. Accuracy gate last (only when the case is otherwise solvable).
         if (
             not any(problem.is_error for problem in problems)
             and case.tolerance < self._certified_accuracy
@@ -619,10 +648,29 @@ class Fem2dEngine:
 
         return problems
 
-    def _build_mesh_and_load(
+    @staticmethod
+    def _mesh_budget_problem(case: Case, exc: MeshBudgetError) -> Problem:
+        return Problem(
+            E_MESH_NODE_BUDGET,
+            f"{case.name}: requested element_size={exc.element_size:g} m requires "
+            f"{exc.nodes} nodes ({exc.nr} x {exc.nz}), exceeding max_nodes={exc.max_nodes}",
+            "error",
+        )
+
+    def _mesh_parameters(
         self, case: Case
-    ) -> tuple[Mesh, np.ndarray, list[tuple[float, float]]]:
-        """Construct the graded mesh and assemble volume/sheet loads for ``case``."""
+    ) -> tuple[
+        float,
+        float,
+        float,
+        float,
+        tuple[float, float, float, float],
+        list[float],
+        list[float],
+        list[tuple[float, float]],
+        list[Problem],
+    ]:
+        """Compute domain, step size, refinement box, breakpoints, and probe coordinates."""
         (
             r_breaks,
             z_breaks,
@@ -663,21 +711,19 @@ class Fem2dEngine:
             z_max = max_z2 + pad
 
         probes_rz: list[tuple[float, float]] = []
+        probe_problems: list[Problem] = []
         for index, probe in enumerate(case.probes):
             pr = math.hypot(probe.point[0], probe.point[1])
             pz = probe.point[2]
             if pr > r_max or pz < z_min or pz > z_max:
-                raise EngineError(
-                    ENGINE_ID,
-                    [
-                        Problem(
-                            E_PROBE_OUTSIDE_DOMAIN,
-                            f"{case.name}: probe #{index} at {probe.point} maps to "
-                            f"(r={pr}, z={pz}), outside domain [0, {r_max}] x [{z_min}, {z_max}]; "
-                            f"increase far_field_factor (currently {self._far_field_factor})",
-                            "error",
-                        )
-                    ],
+                probe_problems.append(
+                    Problem(
+                        E_PROBE_OUTSIDE_DOMAIN,
+                        f"{case.name}: probe #{index} at {probe.point} maps to "
+                        f"(r={pr}, z={pz}), outside domain [0, {r_max}] x [{z_min}, {z_max}]; "
+                        f"increase far_field_factor (currently {self._far_field_factor})",
+                        "error",
+                    )
                 )
             probes_rz.append((pr, pz))
 
@@ -698,16 +744,41 @@ class Fem2dEngine:
             ref_z1 = min(z_max, near_z_max + 2.0 * h)
             ref_box = (0.0, ref_r1, ref_z0, ref_z1)
 
-        mesh = rectangular_mesh(
+        bps_r = _dedup_sorted(r_breaks, 0.0, r_max)
+        bps_z = _dedup_sorted(z_breaks, z_min, z_max)
+        return r_max, z_min, z_max, h, ref_box, bps_r, bps_z, probes_rz, probe_problems
+
+    def _build_mesh_and_load(
+        self, case: Case
+    ) -> tuple[Mesh, np.ndarray, list[tuple[float, float]]]:
+        """Construct the graded mesh and assemble volume/sheet loads for ``case``."""
+        (
             r_max,
             z_min,
             z_max,
             h,
-            refinement_box=ref_box,
-            breakpoints_r=_dedup_sorted(r_breaks, 0.0, r_max),
-            breakpoints_z=_dedup_sorted(z_breaks, z_min, z_max),
-            growth=self._growth,
-        )
+            ref_box,
+            bps_r,
+            bps_z,
+            probes_rz,
+            probe_problems,
+        ) = self._mesh_parameters(case)
+        if probe_problems:
+            raise EngineError(ENGINE_ID, probe_problems)
+
+        try:
+            mesh = rectangular_mesh(
+                r_max,
+                z_min,
+                z_max,
+                h,
+                refinement_box=ref_box,
+                breakpoints_r=bps_r,
+                breakpoints_z=bps_z,
+                growth=self._growth,
+            )
+        except MeshBudgetError as exc:
+            raise EngineError(ENGINE_ID, [self._mesh_budget_problem(case, exc)]) from exc
 
         load = np.zeros(mesh.nodes.shape[0], dtype=np.float64)
         for component in case.components:
