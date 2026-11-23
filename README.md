@@ -5,9 +5,11 @@ Open-source 3D magnetic field simulator for **permanent magnets, coils and — l
 MagWave is built for the case the existing tools get wrong: you have a **CAD assembly**, you need to know
 the field, and you do not want to spend five figures or a weekend on solver input files.
 
-> **Status: Phase 0 — specification.** This repository currently contains the research dossier, the PRD,
-> the architecture, the decision records and the repository scaffolding. There is no solver code yet.
-> The first code lands with milestone M1 (see [docs/ROADMAP.md](docs/ROADMAP.md)).
+> **Status: pre-release, milestones M0–M5 complete.** Working today: the analytic Tier 0 solver, an
+> axisymmetric Tier 1 finite-element solver with nonlinear steel, permanent-magnet demagnetization,
+> force computation and per-case mesh-density control with a convergence study, plus the desktop GUI,
+> CAD import and the validation harness. Arbitrary 3D assemblies are Tier 2; there is no packaged
+> release yet (M6 — see [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 ## Why this exists
 
@@ -23,8 +25,8 @@ rests on.
 
 | Tier | Answers | Cannot answer | Status |
 |---|---|---|---|
-| **0 — analytic** | field of block/cylinder/ring magnets and coils anywhere, instantly; forces between magnets | anything containing permeable (steel) material | first milestone |
-| **1 — 2D / axisymmetric FEM** | steel, saturation, forces on round or constant-section parts: solenoids, pot magnets, magnetizing fixtures, speakers | arbitrary 3D assemblies | second |
+| **0 — analytic** | field of block/cylinder/ring magnets and coils anywhere, instantly; forces between magnets | anything containing permeable (steel) material | implemented |
+| **1 — 2D / axisymmetric FEM** | steel, saturation, forces on round or constant-section parts: solenoids, pot magnets, magnetizing fixtures, speakers | arbitrary 3D assemblies | implemented — linear and nonlinear steel, permanent-magnet demagnetization, forces, mesh-density control |
 | **2 — 3D FEM** | arbitrary assemblies with iron, saturation, forces | speed of a 40-year commercial BEM kernel | later target |
 | **3 — transient / eddy** | capacitor-discharge pulses, eddy currents, motion | — | research |
 
