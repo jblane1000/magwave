@@ -31,6 +31,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import stat
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -44,6 +46,16 @@ FORMATS = ("csv", "json")
 SAMPLES_SCHEMA = "magwave.samples/1"
 #: Grid end points are inclusive when within this distance (metres) of the last step.
 GRID_INCLUSIVE_TOL = 1e-12
+E_OUTPUT_PATH = "E_OUTPUT_PATH"
+
+
+class _OutputPathError(OSError):
+    """Refusal for an unwritable or missing-directory ``--json`` output path."""
+
+    def __init__(self, path: str, reason: str) -> None:
+        self.path = path
+        self.reason = reason
+        super().__init__(f"{E_OUTPUT_PATH}: {path}: {reason}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,10 +153,70 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 # --------------------------------------------------------------------------------------
-# bench
+# bench & output path validation
 # --------------------------------------------------------------------------------------
+def _validate_json_output_path(raw_path: str) -> None:
+    """Validate that ``raw_path`` is writable before any command performs work."""
+    if not raw_path or not raw_path.strip():
+        raise _OutputPathError(raw_path, "path is empty (not writable)")
+    seps = (os.sep,) if os.altsep is None else (os.sep, os.altsep)
+    target = Path(raw_path)
+    if raw_path.endswith(seps) or target.name in ("", ".", ".."):
+        raise _OutputPathError(raw_path, "path is a directory (not writable as a file)")
+    try:
+        is_link = target.is_symlink()
+    except OSError as exc:
+        raise _OutputPathError(raw_path, f"not writable ({exc.strerror or exc})") from exc
+    effective = target.resolve(strict=False) if is_link else target
+    parent = effective.parent
+
+    try:
+        parent_stat = os.stat(parent)
+    except FileNotFoundError as exc:
+        raise _OutputPathError(raw_path, f"missing directory ({parent})") from exc
+    except NotADirectoryError as exc:
+        raise _OutputPathError(raw_path, f"parent is not a directory ({parent})") from exc
+    except PermissionError as exc:
+        raise _OutputPathError(raw_path, f"directory is not writable ({parent})") from exc
+    except OSError as exc:
+        raise _OutputPathError(raw_path, f"not writable ({exc.strerror or exc})") from exc
+    if not stat.S_ISDIR(parent_stat.st_mode):
+        raise _OutputPathError(raw_path, f"parent is not a directory ({parent})")
+
+    try:
+        target_stat = os.stat(effective)
+    except FileNotFoundError:
+        if not os.access(parent, os.W_OK | os.X_OK):
+            raise _OutputPathError(raw_path, f"directory is not writable ({parent})") from None
+        return
+    except PermissionError as exc:
+        raise _OutputPathError(raw_path, "not writable (permission denied)") from exc
+    except OSError as exc:
+        raise _OutputPathError(raw_path, f"not writable ({exc.strerror or exc})") from exc
+
+    if stat.S_ISDIR(target_stat.st_mode):
+        raise _OutputPathError(raw_path, "path is a directory (not writable as a file)")
+    if not os.access(effective, os.W_OK):
+        raise _OutputPathError(raw_path, "file is not writable")
+    if stat.S_ISREG(target_stat.st_mode):
+        try:
+            fd = os.open(effective, os.O_WRONLY)
+        except OSError as exc:
+            raise _OutputPathError(
+                raw_path, f"file is not writable ({exc.strerror or exc})"
+            ) from exc
+        os.close(fd)
+
+
+def _write_json_text(path: str, text: str) -> None:
+    try:
+        Path(path).write_text(text, encoding="utf-8")
+    except OSError as exc:
+        raise _OutputPathError(path, f"not writable ({exc.strerror or exc})") from exc
+
+
 def _write_json(path: str, payload: dict) -> None:
-    Path(path).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
 def _run_bench(json_path: str | None) -> int:
@@ -154,7 +226,7 @@ def _run_bench(json_path: str | None) -> int:
     print(format_table(results))
     passed = sum(1 for result in results if result.passed)
     print(f"{passed}/{len(results)} PASS")
-    if json_path:
+    if json_path is not None:
         payload = results_payload(results)
         _write_json(json_path, payload)
     return 0 if all_passed(results) else 1
@@ -193,7 +265,7 @@ def _run_engine_bench(
     summary = engine_summary(rows)
     print(f"{summary['passed']}/{summary['cross_checked']} PASS")
     print(f"{summary['cross_checked']} cross-checked, {summary['skipped']} skipped")
-    if json_path:
+    if json_path is not None:
         _write_json(json_path, engine_results_payload(rows, engine))
     if report_accuracy:
         acc_rows = measure_engine_accuracy(cases, engine)
@@ -402,8 +474,6 @@ def _run_solve_fem2d(
     element_size: float | None = None,
     max_iterations: int | None = None,
 ) -> int:
-    from .engines.base import EngineError, errors_in
-
     case = _load_case_for_cli(case_path, "solve")
     if case is None:
         return 2
@@ -415,25 +485,9 @@ def _run_solve_fem2d(
         max_iterations=max_iterations,
         material_model=material_model,
     )
-    problems = engine.validate(case)
-    errors = errors_in(problems)
-    if errors:
-        capabilities = engine.capabilities()
-        print(
-            f"magwave solve: engine {capabilities.engine_id} {capabilities.engine_version} "
-            f"cannot solve case {case.name!r}:",
-            file=sys.stderr,
-        )
-        for problem in errors:
-            print(f"  {problem}", file=sys.stderr)
-        return 2
-    for problem in problems:
+    result = engine.solve(case)
+    for problem in result.problems:
         print(f"magwave solve: {problem}", file=sys.stderr)
-    try:
-        result = engine.solve(case)
-    except EngineError as exc:
-        print(f"magwave solve: {_one_line(exc)}", file=sys.stderr)
-        return 2
     for index, (probe, sample) in enumerate(zip(case.probes, result.samples, strict=True)):
         point_text = ", ".join(repr(float(coord)) for coord in probe.point)
         value = float(result.value(index, probe.component))
@@ -460,7 +514,6 @@ def _run_report(
     max_iterations: int | None = None,
 ) -> int:
     from .cases import CaseError
-    from .engines.base import EngineError
     from .report import render_report
 
     case = _load_case_for_cli(case_path, "report")
@@ -479,7 +532,7 @@ def _run_report(
     )
     try:
         markdown = render_report(case, engine, case_file=case_path)
-    except (EngineError, CaseError) as exc:
+    except CaseError as exc:
         print(f"magwave report: {_one_line(exc)}", file=sys.stderr)
         return 1
     if out_path is None or out_path == "-":
@@ -512,7 +565,7 @@ def _run_converge(
         format_convergence_table,
         probe_column_header,
     )
-    from .engines.base import EngineError
+    from .engines.base import raise_on_errors
     from .fem2d.engine import default_element_size
 
     case = _load_case_for_cli(case_path, "converge")
@@ -527,20 +580,22 @@ def _run_converge(
         sizes = (4.0 * base_h, 2.0 * base_h, base_h)
 
     material_model = _detect_fem2d_material_model(case)
-    rungs: list[ConvergenceRung] = []
-    probe_headers: tuple[str, ...] | None = None
-    for size in sizes:
-        engine = _make_engine(
+    engines = [
+        _make_engine(
             "fem2d",
             element_size=size,
             max_iterations=max_iterations,
             material_model=material_model,
         )
-        try:
-            result = engine.solve(case)
-        except (EngineError, ValueError) as exc:
-            print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
-            return 1
+        for size in sizes
+    ]
+    for engine in engines:
+        raise_on_errors(engine.capabilities().engine_id, engine.validate(case))
+
+    rungs: list[ConvergenceRung] = []
+    probe_headers: tuple[str, ...] | None = None
+    for size, engine in zip(sizes, engines, strict=True):
+        result = engine.solve(case)
         conv = result.convergence
         if conv is None:  # pragma: no cover - Fem2dEngine always populates convergence
             print("magwave converge: engine did not return mesh statistics", file=sys.stderr)
@@ -574,11 +629,7 @@ def _run_converge(
         return 1
     sys.stdout.write(format_convergence_table(study))
     if json_path is not None:
-        try:
-            _write_json(json_path, convergence_payload(study))
-        except OSError as exc:
-            print(f"magwave converge: {json_path}: {_one_line(exc)}", file=sys.stderr)
-            return 1
+        _write_json(json_path, convergence_payload(study))
     return 0
 
 
@@ -658,16 +709,10 @@ def _is_ocp_failure(exc: BaseException) -> bool:
 def _run_import(
     cad_path: str,
     json_path: str | None,
-    role_specs: list[str],
+    mapping: dict[int | str, str],
     defeature_below: float | None = None,
 ) -> int:
     from .cad import MissingExtraError, assign, import_cad, unassigned
-
-    try:
-        mapping = _parse_role_specs(role_specs)
-    except ValueError as exc:
-        print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
-        return 2
 
     try:
         manifest = import_cad(cad_path, defeature_below=defeature_below)
@@ -690,11 +735,7 @@ def _run_import(
     print(_format_manifest_summary(manifest))
 
     if json_path is not None:
-        try:
-            Path(json_path).write_text(manifest.to_json() + "\n", encoding="utf-8")
-        except OSError as exc:
-            print(f"magwave import: {json_path}: {_one_line(exc)}", file=sys.stderr)
-            return 1
+        _write_json_text(json_path, manifest.to_json() + "\n")
 
     has_skipped = any(defect.kind == "skipped_body" for defect in manifest.defects)
     if unassigned(manifest) or has_skipped:
@@ -762,7 +803,121 @@ def _parse_sizes(spec: str) -> tuple[float, ...]:
     return tuple(values)
 
 
+def _dispatch(
+    args: argparse.Namespace,
+    *,
+    element_size: float | None,
+    parser: argparse.ArgumentParser,
+) -> int:
+    if args.command == "bench":
+        if args.json is not None:
+            _validate_json_output_path(args.json)
+        if args.engine is None:
+            return _run_bench(args.json)
+        return _run_engine_bench(
+            args.engine,
+            args.json,
+            report_accuracy=args.report_accuracy,
+            max_iterations=args.max_iterations,
+        )
+    if args.command == "solve":
+        if args.case is None:
+            parser.error("solve: a case JSON path is required")
+        if args.json is not None:
+            parser.error("solve: --json applies to bench or converge only")
+        engine_name = args.engine or "magpylib"
+        if engine_name == "fem2d":
+            if args.grid is not None or args.points is not None:
+                print(
+                    "magwave solve: --grid and --points are not supported with --engine fem2d "
+                    "(Fem2dEngine has no point sampler; omit --grid/--points to evaluate case probes)",
+                    file=sys.stderr,
+                )
+                return 2
+            if args.format is not None:
+                print(
+                    "magwave solve: --format is not supported with --engine fem2d",
+                    file=sys.stderr,
+                )
+                return 2
+            return _run_solve_fem2d(
+                args.case,
+                element_size=element_size,
+                max_iterations=args.max_iterations,
+            )
+        if (args.grid is None) == (args.points is None):
+            parser.error("solve: exactly one of --grid or --points is required")
+        try:
+            points = parse_grid(args.grid) if args.grid is not None else parse_points(args.points)
+        except ValueError as exc:
+            parser.error(str(exc))
+        return _run_solve(args.case, points, args.format or "csv")
+    if args.command == "report":
+        if args.json is not None or args.format or args.grid or args.points:
+            parser.error("report: --json, --format, --grid and --points do not apply to report")
+        if args.case is None:
+            print("magwave report: a case JSON path is required", file=sys.stderr)
+            return 1
+        return _run_report(
+            args.case,
+            args.engine or "magpylib",
+            args.out,
+            element_size=element_size,
+            max_iterations=args.max_iterations,
+        )
+    if args.command == "converge":
+        if args.engine == "magpylib":
+            parser.error(
+                "converge: --engine magpylib is not supported (Tier 0 has no mesh); "
+                "use --engine fem2d"
+            )
+        if args.case is None:
+            parser.error("converge: a case JSON path is required")
+        if args.sizes is not None and element_size is not None:
+            parser.error("converge: --element-size and --sizes cannot be combined")
+        parsed_sizes: tuple[float, ...] | None = None
+        if args.sizes is not None:
+            try:
+                parsed_sizes = _parse_sizes(args.sizes)
+            except ValueError as exc:
+                print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
+                return 1
+        if args.json is not None:
+            _validate_json_output_path(args.json)
+        return _run_converge(
+            args.case,
+            sizes=parsed_sizes,
+            element_size=element_size,
+            max_iterations=args.max_iterations,
+            json_path=args.json,
+        )
+    if args.command == "gui":
+        if args.json is not None or args.engine:
+            parser.error("gui: --json and --engine do not apply to gui")
+        return _run_gui(args.case)
+    if args.command == "import":
+        if args.engine:
+            parser.error("import: --engine does not apply to import")
+        if args.case is None:
+            parser.error("import: a CAD file path is required")
+        try:
+            mapping = _parse_role_specs(args.role)
+        except ValueError as exc:
+            print(f"magwave import: {_one_line(exc)}", file=sys.stderr)
+            return 2
+        if args.json is not None:
+            _validate_json_output_path(args.json)
+        return _run_import(args.case, args.json, mapping, args.defeature_below)
+    print(
+        f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
+    from .engines.base import EngineError
+
     parser = build_parser()
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     normalized_argv = _attach_value_flags(raw_argv, ("--element-size", "--sizes"))
@@ -822,99 +977,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.max_iterations < 1:
             parser.error("--max-iterations must be a positive integer (>= 1)")
 
-    if args.command == "bench":
-        if args.engine is None:
-            return _run_bench(args.json)
-        return _run_engine_bench(
-            args.engine,
-            args.json,
-            report_accuracy=args.report_accuracy,
-            max_iterations=args.max_iterations,
-        )
-    if args.command == "solve":
-        if args.case is None:
-            parser.error("solve: a case JSON path is required")
-        if args.json:
-            parser.error("solve: --json applies to bench or converge only")
-        engine_name = args.engine or "magpylib"
-        if engine_name == "fem2d":
-            if args.grid is not None or args.points is not None:
-                print(
-                    "magwave solve: --grid and --points are not supported with --engine fem2d "
-                    "(Fem2dEngine has no point sampler; omit --grid/--points to evaluate case probes)",
-                    file=sys.stderr,
-                )
-                return 2
-            if args.format is not None:
-                print(
-                    "magwave solve: --format is not supported with --engine fem2d",
-                    file=sys.stderr,
-                )
-                return 2
-            return _run_solve_fem2d(
-                args.case,
-                element_size=element_size,
-                max_iterations=args.max_iterations,
-            )
-        if (args.grid is None) == (args.points is None):
-            parser.error("solve: exactly one of --grid or --points is required")
-        try:
-            points = parse_grid(args.grid) if args.grid is not None else parse_points(args.points)
-        except ValueError as exc:
-            parser.error(str(exc))
-        return _run_solve(args.case, points, args.format or "csv")
-    if args.command == "report":
-        if args.json or args.format or args.grid or args.points:
-            parser.error("report: --json, --format, --grid and --points do not apply to report")
-        if args.case is None:
-            print("magwave report: a case JSON path is required", file=sys.stderr)
-            return 1
-        return _run_report(
-            args.case,
-            args.engine or "magpylib",
-            args.out,
-            element_size=element_size,
-            max_iterations=args.max_iterations,
-        )
-    if args.command == "converge":
-        if args.engine == "magpylib":
-            parser.error(
-                "converge: --engine magpylib is not supported (Tier 0 has no mesh); "
-                "use --engine fem2d"
-            )
-        if args.case is None:
-            parser.error("converge: a case JSON path is required")
-        if args.sizes is not None and element_size is not None:
-            parser.error("converge: --element-size and --sizes cannot be combined")
-        parsed_sizes: tuple[float, ...] | None = None
-        if args.sizes is not None:
-            try:
-                parsed_sizes = _parse_sizes(args.sizes)
-            except ValueError as exc:
-                print(f"magwave converge: {_one_line(exc)}", file=sys.stderr)
-                return 1
-        return _run_converge(
-            args.case,
-            sizes=parsed_sizes,
-            element_size=element_size,
-            max_iterations=args.max_iterations,
-            json_path=args.json,
-        )
-    if args.command == "gui":
-        if args.json or args.engine:
-            parser.error("gui: --json and --engine do not apply to gui")
-        return _run_gui(args.case)
-    if args.command == "import":
-        if args.engine:
-            parser.error("import: --engine does not apply to import")
-        if args.case is None:
-            parser.error("import: a CAD file path is required")
-        return _run_import(args.case, args.json, args.role, args.defeature_below)
-    print(
-        f"magwave: command {args.command!r} is not implemented yet (see docs/ROADMAP.md).",
-        file=sys.stderr,
-    )
-    return 2
+    try:
+        return _dispatch(args, element_size=element_size, parser=parser)
+    except (EngineError, _OutputPathError) as exc:
+        print(f"magwave {args.command}: {_one_line(exc)}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":  # pragma: no cover

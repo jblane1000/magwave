@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .assembly import load_current_density, load_magnetization_offset, load_sheet, stiffness
-from .engine import E_NOT_CONVERGED, ENGINE_ID, RUNG, Fem2dEngine
+from .engine import E_MESH_NODE_BUDGET, E_NOT_CONVERGED, ENGINE_ID, RUNG, Fem2dEngine
 from .field import element_field, sample_field
 from .force import (
     E_FORCE_CONTOUR_DOES_NOT_ENCLOSE,
@@ -23,7 +23,14 @@ from .force import (
     maxwell_force,
     torque,
 )
-from .mesh import Mesh, MeshStats, rectangular_mesh
+from .mesh import (
+    DEFAULT_MAX_NODES,
+    Mesh,
+    MeshBudgetError,
+    MeshStats,
+    check_rectangular_mesh_budget,
+    rectangular_mesh,
+)
 from .nonlinear import (
     NonlinearConvergenceError,
     assemble_nonlinear_system,
@@ -33,6 +40,7 @@ from .nonlinear import (
 from .solve import SolveReport, dirichlet_nodes, solve_axisymmetric
 
 __all__ = [
+    "DEFAULT_MAX_NODES",
     "ENGINE_ID",
     "E_FORCE_CONTOUR_DOES_NOT_ENCLOSE",
     "E_FORCE_CONTOUR_IN_MATERIAL",
@@ -40,6 +48,7 @@ __all__ = [
     "E_FORCE_TARGET_AMBIGUOUS",
     "E_FORCE_TARGET_UNKNOWN",
     "E_FORCE_UNSUPPORTED_CASE",
+    "E_MESH_NODE_BUDGET",
     "E_NOT_CONVERGED",
     "E_TORQUE_NOT_MEANINGFUL",
     "RUNG",
@@ -49,10 +58,12 @@ __all__ = [
     "ForceError",
     "ForceResult",
     "Mesh",
+    "MeshBudgetError",
     "MeshStats",
     "NonlinearConvergenceError",
     "SolveReport",
     "assemble_nonlinear_system",
+    "check_rectangular_mesh_budget",
     "coenergy_delta_study",
     "coenergy_force",
     "count_interface_nodes",
