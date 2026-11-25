@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from magwave import __version__ as MAGWAVE_VERSION
+
 REPO = Path(__file__).resolve().parents[1]
 RENDERER = REPO / "tools" / "render_benchmarks.py"
 
@@ -78,3 +80,16 @@ def test_check_rejects_a_perturbed_render(tmp_path: Path) -> None:
     assert checked.returncode == 1
     assert target.name in checked.stderr
     assert "stale" in checked.stderr
+
+
+def test_rendered_and_committed_docs_carry_engine_version(tmp_path: Path) -> None:
+    target = tmp_path / "BENCHMARKS.md"
+    rendered = _run("--out", str(target))
+    assert rendered.returncode == 0, rendered.stderr
+
+    for doc_path in (target, REPO / "docs" / "BENCHMARKS.md"):
+        text = doc_path.read_text(encoding="utf-8")
+        assert f"Engine: magwave {MAGWAVE_VERSION}" in text
+        engine_lines = [line for line in text.splitlines() if line.startswith("Engine: ")]
+        assert len(engine_lines) == 1
+        assert engine_lines[0].startswith(f"Engine: magwave {MAGWAVE_VERSION} · bench schema `")
