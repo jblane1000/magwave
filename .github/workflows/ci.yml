@@ -33,6 +33,8 @@ jobs:
         run: python tools/adr_check_map.py
       - name: Tests
         run: pytest -q
+      - name: Benchmarks doc is current (FR-071)
+        run: python tools/render_benchmarks.py --check
       - name: Benchmarks (FR-070)
         run: python -m magwave bench
       - name: GUI tests (offscreen)
