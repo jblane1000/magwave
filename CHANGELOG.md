@@ -8,6 +8,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **M6 — Generated `docs/BENCHMARKS.md` and CI staleness gate (FR-071)**: added
+  `tools/render_benchmarks.py` (stdlib-only) to render `docs/BENCHMARKS.md` deterministically from
+  `python -m magwave bench --json` and fail CI via `--check` whenever the committed table drifts.
 - **M5.5 — Per-case mesh density control (`mesh.element_size`), `--element-size`, and `converge`**:
   added frozen `MeshSpec(element_size)` and optional trailing `Case.mesh` to `magwave.case/1`
   (`src/magwave/cases.py`, omitted from `Case.to_dict()` when `None`, strict `_keys` and
