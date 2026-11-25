@@ -1,0 +1,10 @@
+# Include package marker and test fixture helpers omitted by setuptools' default test_*.py glob
+# (required by tests/test_cad_import.py and tests/test_defeature.py).
+include tests/__init__.py
+include tests/fixtures/*.py
+
+# Include helper scripts imported by unit tests (e.g. tests/test_m54_forces.py).
+include tools/*.py
+
+# Include example case files referenced by docs and packaging acceptance checks.
+include examples/*.json
