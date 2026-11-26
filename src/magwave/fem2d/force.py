@@ -768,11 +768,16 @@ def maxwell_force(
 
     # F_x = F_y = F_theta = 0 hold identically by axisymmetric A_phi construction
     # (d/dphi = 0, B_phi = 0). The meridional radial traction integral radial_force_2pi
-    # is NOT asserted to vanish: by the cylindrical divergence theorem it equals the
-    # hoop force plus 2*pi * int T_phiphi dr dz (T_phiphi = -B^2/(2*mu0)), so it is
-    # physically non-zero and contour-dependent (measured |F_r|/|F_z| on shipped force
-    # cases: coaxial_loops 0.828..1.055; magnet_plate CONTOUR_A 0.461..0.468,
-    # CONTOUR_B 0.360, all > 1e-3).
+    # is NOT asserted to vanish. It is not a Cartesian component of the closed-surface
+    # flux: the x and y components of T.n carry cos(phi) and sin(phi), which integrate to
+    # zero over the azimuth, which is precisely why F_x = F_y = 0 identically and why the
+    # removed 8-sector mean(cos(phis)) check could never fire (mean = -5.6e-17). This
+    # azimuthally summed radial traction is therefore free to be non-zero; measured
+    # |F_r|/|F_z| on shipped force cases: coaxial_loops 0.828..1.055; magnet_plate
+    # CONTOUR_A 0.461..0.468, CONTOUR_B 0.360. An empty vacuum box (r=0.02,
+    # z=0.030..0.040), where the true force is zero and F_z=8.6e-05 N, returns
+    # radial_force_2pi=-5.0e-02 N. A tolerance gate on this quantity would fire on
+    # every valid case, so none is applied.
     notes = (
         *snap_notes,
         f"segment F_z (N): bottom={seg_values['bottom']:+.6e}, outer={seg_values['outer']:+.6e}, "
