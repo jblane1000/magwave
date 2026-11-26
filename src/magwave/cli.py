@@ -725,12 +725,12 @@ def _run_converge(
 # gui
 # --------------------------------------------------------------------------------------
 def _run_gui(case_path: str | None) -> int:
-    from .gui import MISSING_GUI_MESSAGE, MissingGuiError, launch_gui, require_gui
+    from .gui import MissingGuiError, launch_gui, require_gui
 
     try:
         require_gui()
-    except MissingGuiError:
-        print(MISSING_GUI_MESSAGE, file=sys.stderr)
+    except MissingGuiError as exc:
+        print(exc, file=sys.stderr)
         return 1
     return launch_gui(case_path)
 

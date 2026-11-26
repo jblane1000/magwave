@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
@@ -29,7 +30,29 @@ from .cases import (
 from .engines.base import Engine, EngineError, Problem, Result, errors_in
 from .report import display_case_file, render_report
 
-MISSING_GUI_MESSAGE = 'magwave gui needs the GUI extra: pip install "magwave[gui]"'
+MISSING_GUI_MESSAGE = (
+    'magwave gui: the GUI extra is not installed; install it with: pip install "magwave[gui]"'
+)
+
+GUI_UBUNTU_APT_PACKAGES = (
+    "libgl1 libegl1 libglib2.0-0 libfontconfig1 libxkbcommon0 libdbus-1-3 libxrender1"
+)
+
+_UBUNTU_GUI_LIB_PACKAGES: dict[str, str] = {
+    "libGL.so.1": "libgl1",
+    "libEGL.so.1": "libegl1",
+    "libglib-2.0.so.0": "libglib2.0-0",
+    "libgthread-2.0.so.0": "libglib2.0-0",
+    "libxkbcommon.so.0": "libxkbcommon0",
+    "libdbus-1.so.3": "libdbus-1-3",
+    "libXrender.so.1": "libxrender1",
+    "libX11.so.6": "libx11-6",
+    "libfreetype.so.6": "libfreetype6",
+    "libfontconfig.so.1": "libfontconfig1",
+}
+
+_SHARED_LIB_RE = re.compile(r"\b(lib[A-Za-z0-9_.+-]+\.so(?:\.[0-9]+)*)\b")
+_FALLBACK_SHARED_LIB_RE = re.compile(r"([^\s:/]+\.so(?:\.[0-9]+)*)")
 
 _ROLE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("magnet: cuboid", "magnet:cuboid"),
@@ -45,7 +68,7 @@ _QT_CLASSES: dict[str, Any] = {}
 
 
 class MissingGuiError(RuntimeError):
-    """Raised when the desktop UI is requested without the ``gui`` extra installed."""
+    """Raised when the desktop UI is unavailable due to a missing ``gui`` extra or system library."""
 
 
 class RoleAssignmentError(ValueError):
@@ -84,6 +107,44 @@ def with_component(case: Case, component: Any, index: int = 0) -> Case:
     return clone
 
 
+def _extract_missing_shared_library(exc: ImportError) -> str | None:
+    """Extract a missing ``.so`` library name from ``exc`` when a system shared object failed to load."""
+    if isinstance(exc, ModuleNotFoundError):
+        return None
+    message = str(exc)
+    match = _SHARED_LIB_RE.search(message)
+    if match is not None:
+        return match.group(1)
+    if "cannot open shared object file" in message:
+        fallback = _FALLBACK_SHARED_LIB_RE.search(message)
+        if fallback is not None:
+            return fallback.group(1)
+    return None
+
+
+def _diagnose_gui_import_error(exc: ImportError) -> str:
+    """Return a user-facing message distinguishing a missing ``gui`` extra from a missing system library."""
+    lib_name = _extract_missing_shared_library(exc)
+    if lib_name is None:
+        return MISSING_GUI_MESSAGE
+
+    pkg = _UBUNTU_GUI_LIB_PACKAGES.get(lib_name)
+    if pkg is not None:
+        return (
+            f"magwave gui: the Python GUI extra is installed, but system library '{lib_name}' "
+            f"could not be loaded (this is a system package problem, not a Python one; "
+            f"on Ubuntu/Debian install '{pkg}'). Example: "
+            f"sudo apt-get install -y --no-install-recommends {GUI_UBUNTU_APT_PACKAGES}"
+        )
+    return (
+        f"magwave gui: the Python GUI extra is installed, but system library '{lib_name}' "
+        f"could not be loaded (this is a system package problem, not a Python one). "
+        f"Install the missing system library package for your OS; on Ubuntu/Debian the "
+        f"Qt 6 / OpenGL prerequisites are: "
+        f"sudo apt-get install -y --no-install-recommends {GUI_UBUNTU_APT_PACKAGES}"
+    )
+
+
 def require_gui() -> tuple[Any, Any, Any, Any, Any]:
     """Import and return ``(PySide6, QtCore, QtGui, QtWidgets, pyvista)`` or raise :class:`MissingGuiError`."""
     try:
@@ -91,7 +152,7 @@ def require_gui() -> tuple[Any, Any, Any, Any, Any]:
         import pyvista as pv
         from PySide6 import QtCore, QtGui, QtWidgets
     except ImportError as exc:
-        raise MissingGuiError(MISSING_GUI_MESSAGE) from exc
+        raise MissingGuiError(_diagnose_gui_import_error(exc)) from exc
     return PySide6, QtCore, QtGui, QtWidgets, pv
 
 
