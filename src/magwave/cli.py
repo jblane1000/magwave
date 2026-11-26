@@ -9,13 +9,16 @@ Implemented:
   engine cannot model are reported as ``SKIP: <CODE>: <reason>``.
 * ``magwave validate CASE.json [--json PATH]`` — checks JSON syntax, ``magwave.case/2``
   schema, units/frame declarations, components, probes, expected values, tolerance gate,
-  manifest roles, and mesh spec without solving. Reports every defect found on stderr and
-  exits 0 when valid or 1 when invalid.
-* ``magwave run CASE.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR]`` —
+  manifest roles, and mesh spec structurally only (no engine is checked; use
+  ``magwave run CASE.json --engine ID --dry-run`` to pre-flight against an engine). Reports
+  every defect found on stderr and exits 0 when valid or 1 when invalid.
+* ``magwave run CASE.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR] [--dry-run]`` —
   loads and validates the case, evaluates the case's own probes, writes the FR-002
   ``.results.json`` and ``.results.csv`` artefacts beside the case (or in ``DIR``), and
-  prints a short human summary to stdout. Exit 0 on success, 1 when the case fails to
-  load or validate, 2 when the engine refuses the case.
+  prints a short human summary to stdout. With ``--dry-run``, checks whether the selected
+  engine will accept the case without solving or writing artefacts. Exit 0 on success (or
+  dry-run accepted), 1 when the case fails to load or validate, 2 when the engine refuses
+  the case.
 * ``magwave export CASE.json (--points SPEC | --grid SPEC) [--out PATH|-] [--format csv|json]`` —
   samples ``B`` on the requested points or grid with Tier 0 and writes CSV or JSON to
   ``PATH`` (or stdout by default / ``--out -``). Exit 0 on success, 1 on load/output-path
@@ -78,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
             "Exit codes:\n"
             "  validate: 0 valid, 1 invalid or unreadable case/output path\n"
             "  run:      0 success, 1 case fails to load or validate, 2 engine refuses the case\n"
+            "            (with --dry-run: 0 engine would accept and nothing was solved, "
+            "2 engine refuses the case)\n"
             "  export:   0 success, 1 case fails to load or --out cannot be opened, "
             "2 engine refuses the case"
         ),
@@ -179,6 +184,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         default=None,
         help="solve/run: directory for .results.json and .results.csv (default: case directory)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "run: check whether the selected engine would accept the case without solving "
+            "or writing artefacts"
+        ),
     )
     return parser
 
@@ -841,7 +854,7 @@ def _run_validate(case_path: str, json_path: str | None) -> int:
     if json_path is not None:
         _write_json(json_path, report.to_dict())
     if report.valid:
-        print(f"valid: true (schema: {report.schema})")
+        print(f"valid: true (schema: {report.schema}; structural only — no engine checked)")
         return 0
     for error in report.errors:
         print(f"{error.path}: {error.message}", file=sys.stderr)
@@ -855,6 +868,7 @@ def _run_run(
     element_size: float | None = None,
     max_iterations: int | None = None,
     results_dir: str | None = None,
+    dry_run: bool = False,
 ) -> int:
     from .engines.base import EngineError, errors_in
 
@@ -886,6 +900,16 @@ def _run_run(
         for problem in errors:
             print(f"  {problem}", file=sys.stderr)
         return 2
+
+    if dry_run:
+        for problem in problems:
+            print(f"magwave run: {problem}", file=sys.stderr)
+        capabilities = engine.capabilities()
+        print(
+            f"{capabilities.engine_id} {capabilities.engine_version} would solve case "
+            f"{case.name!r}; dry run, nothing was solved."
+        )
+        return 0
 
     _validate_results_paths(case_path, results_dir)
     try:
@@ -1035,7 +1059,10 @@ def _dispatch(
         )
     if args.command == "validate":
         if args.engine:
-            parser.error("validate: --engine does not apply to validate")
+            parser.error(
+                "validate: --engine does not apply to validate (it checks the schema only); "
+                "use `magwave run CASE --engine ID --dry-run` to pre-flight against an engine"
+            )
         if args.case is None:
             parser.error("validate: a case JSON path is required")
         if args.json is not None:
@@ -1052,6 +1079,7 @@ def _dispatch(
             element_size=element_size,
             max_iterations=args.max_iterations,
             results_dir=args.results_dir,
+            dry_run=args.dry_run,
         )
     if args.command == "export":
         if args.case is None:
@@ -1194,6 +1222,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         if element_size is not None or args.sizes is not None:
             parser.error("--element-size and --sizes require a command")
+        if args.dry_run:
+            parser.error("--dry-run requires a command")
         print(f"magwave {__version__} — M1 skeleton. See docs/PRD.md.")
         return 0
     if args.out is not None and args.command not in ("report", "export"):
@@ -1222,6 +1252,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{args.command}: --defeature-below applies to import only")
     if args.command != "converge" and args.sizes is not None:
         parser.error(f"{args.command}: --sizes applies to converge only")
+    if args.command != "run" and args.dry_run:
+        parser.error(f"{args.command}: --dry-run applies to run only")
     if args.report_accuracy and (args.command != "bench" or args.engine is None):
         parser.error("--report-accuracy is valid only together with bench --engine")
 

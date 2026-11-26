@@ -6,6 +6,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Engine pre-flight via `magwave run --dry-run` (FR-060, #41)**: added `--dry-run` to `magwave run` to validate a case against the selected engine (`engine.validate(case)`) without building a mesh, solving, checking results paths, or writing `.results.json`/`.results.csv` artefacts (`0` if accepted, `2` if refused); updated `magwave validate` output to state `(schema: magwave.case/2; structural only — no engine checked)` while keeping `--json` unchanged, and updated `validate --engine` refusal to direct callers to `magwave run CASE --engine ID --dry-run`.
+
 ### Fixed
 
 - **Refuse off-axis `permeable` bodies in Tier 1 (`E_UNSUPPORTED_OFF_AXIS_PERMEABLE`)**: `Fem2dEngine.validate()` now rejects any `permeable` component with `hypot(x, y) > 1e-12` before solving or writing results artefacts, rather than silently revolving it into an off-axis torus in axisymmetric `A_phi`.
