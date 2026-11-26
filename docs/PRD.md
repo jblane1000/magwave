@@ -159,7 +159,9 @@ so when the same question came back four years later, nothing from that trial co
 - **FR-060** CLI: `magwave run`, `magwave validate`, `magwave export`, `magwave bench`.
   **AC:** Every command works headless in CI with no display.
 - **FR-061** Desktop GUI (PySide6 + PyVista): open case, assign roles, run, view, export.
-  **AC:** A new user completes "import STEP → assign → run → slice" from the README alone.
+  **AC (v0.1):** A new user completes "import STEP → assign → run → export report" from the
+  README alone. Slice planes are FR-051 and are not part of the v0.1 acceptance; the GUI shows
+  geometry, probe points and B glyphs, and the README says so explicitly.
 - **FR-062** Python API: the same objects the CLI uses, importable without Qt.
   **AC:** `import magwave` succeeds on a machine with no Qt installed.
 
