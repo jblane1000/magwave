@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Refuse off-axis `permeable` bodies in Tier 1 (`E_UNSUPPORTED_OFF_AXIS_PERMEABLE`)**: `Fem2dEngine.validate()` now rejects any `permeable` component with `hypot(x, y) > 1e-12` before solving or writing results artefacts, rather than silently revolving it into an off-axis torus in axisymmetric `A_phi`.
+- **Remove tautological 8-sector axisymmetry check in `maxwell_force`**: removed the dead `mean(cos(phis))` / `mean(sin(phis))` assertion and updated the `magwave.fem2d.force` docstring and `ForceResult.notes` so they no longer claim a numerical 8-sector check. `F_x = F_y = 0` hold identically because the transverse components of `T.n` carry `cos(phi)`/`sin(phi)` and integrate to zero over the azimuth; the azimuthally summed radial traction is not a force component and is non-zero on every shipped case (`|F_r|/|F_z|` in `0.360`-`1.055`), so no tolerance gate is applied to it and the notes report it as a diagnostic only.
+- **Surface `E_PROBE_OUTSIDE_DOMAIN` from `Fem2dEngine.validate()`**: `validate()` now extends `problems` with the `probe_problems` returned by `_mesh_parameters(case)` before the accuracy gate rather than discarding them, so validate-only callers and `solve()` enforce identical domain bounds.
+
 ## [0.1.0] - 2026-11-25
 
 First published release. Tier 0 analytic solver, Tier 1 axisymmetric finite-element solver with

@@ -11,8 +11,9 @@ Two independent methods are implemented on top of :class:`~magwave.fem2d.engine.
              + \\frac{1}{2 \\mu_0} (B_z^2 - B_r^2) n_z \\right] 2\\pi r \\, dl,
 
    integrated segment-by-segment with 2-point Gauss–Legendre quadrature via
-   :func:`magwave.fem2d.field.sample_field`. Radial and azimuthal components vanish by
-   axisymmetry (verified numerically across 8 azimuthal sectors).
+   :func:`magwave.fem2d.field.sample_field`. Transverse Cartesian components (``F_x``, ``F_y``)
+   and azimuthal force ``F_theta`` vanish identically by axisymmetric ``A_phi`` construction
+   (``d/dphi = 0``, ``B_phi = 0``); no azimuthal sector check is performed.
 
 2. **Coenergy / virtual work** (:func:`coenergy_force`) by central finite difference over two
    independent solves at axial displacements ``z +- delta``:
@@ -765,21 +766,25 @@ def maxwell_force(
         f_z_total += seg_fz
         radial_force_2pi += float(np.sum(t_r * w_arr))
 
-    # Assert F_x, F_y, F_theta = 0 numerically across 8 symmetric azimuthal sectors.
-    phis = np.linspace(0.0, 2.0 * math.pi, 8, endpoint=False)
-    fx_check = float(radial_force_2pi * np.mean(np.cos(phis)))
-    fy_check = float(radial_force_2pi * np.mean(np.sin(phis)))
-    sym_tol = 1e-13 * max(abs(f_z_total), abs(radial_force_2pi), 1.0)
-    if abs(fx_check) > sym_tol or abs(fy_check) > sym_tol:
-        raise AssertionError(
-            f"axisymmetry numerical check failed: Fx={fx_check:.3e}, Fy={fy_check:.3e}"
-        )
-
+    # F_x = F_y = F_theta = 0 hold identically by axisymmetric A_phi construction
+    # (d/dphi = 0, B_phi = 0). The meridional radial traction integral radial_force_2pi
+    # is NOT asserted to vanish. It is not a Cartesian component of the closed-surface
+    # flux: the x and y components of T.n carry cos(phi) and sin(phi), which integrate to
+    # zero over the azimuth, which is precisely why F_x = F_y = 0 identically and why the
+    # removed 8-sector mean(cos(phis)) check could never fire (mean = -5.6e-17). This
+    # azimuthally summed radial traction is therefore free to be non-zero; measured
+    # |F_r|/|F_z| on shipped force cases: coaxial_loops 0.828..1.055; magnet_plate
+    # CONTOUR_A 0.461..0.468, CONTOUR_B 0.360. An empty vacuum box (r=0.02,
+    # z=0.030..0.040), where the true force is zero and F_z=8.6e-05 N, returns
+    # radial_force_2pi=-5.0e-02 N. A tolerance gate on this quantity would fire on
+    # every valid case, so none is applied.
     notes = (
         *snap_notes,
         f"segment F_z (N): bottom={seg_values['bottom']:+.6e}, outer={seg_values['outer']:+.6e}, "
         f"top={seg_values['top']:+.6e}, axis={seg_values['axis']:.1f}",
-        f"axisymmetry check (8 sectors): Fx={fx_check:.3e} N, Fy={fy_check:.3e} N, F_theta=0 (B_phi=0)",
+        "transverse force: Fx=0 N, Fy=0 N, F_theta=0 N by axisymmetric A_phi construction "
+        "(d/dphi=0, B_phi=0; no azimuthal sector check); meridional radial traction "
+        f"integral={radial_force_2pi:+.6e} N",
     )
     method_detail = (
         "Maxwell stress tensor F_z = closed_integral[(B_r*B_z*n_r + 0.5*(B_z^2 - B_r^2)*n_z)/mu0 "

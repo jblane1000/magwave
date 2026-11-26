@@ -25,6 +25,7 @@ from magwave.fem2d import (
     stiffness,
 )
 from magwave.fem2d.assembly import element_geometry
+from magwave.fem2d.engine import E_PROBE_OUTSIDE_DOMAIN
 from magwave.units import MU0
 
 CORPUS = {case.name: case for case in load_corpus()}
@@ -384,3 +385,44 @@ def test_engine_protocol_and_registration(capsys: pytest.CaptureFixture[str]) ->
     out = capsys.readouterr().out
     assert "thick_solenoid_axis_Bz" in out
     assert "measured:" in out
+
+
+def test_validate_reports_probe_outside_domain() -> None:
+    engine = Fem2dEngine()
+    base = CORPUS["thick_solenoid_axis_Bz"]
+    out_probe = Probe(point=(50.0, 0.0, 0.0), quantity="B", component="z")
+
+    relaxed_case = replace(
+        base,
+        name="probe_outside_domain_relaxed",
+        probes=(out_probe,),
+        expected=(replace(base.expected[0], tolerance=0.05),),
+        tolerance=0.05,
+    )
+    errors = [p for p in engine.validate(relaxed_case) if p.is_error]
+    assert len(errors) == 1
+    assert errors[0].code == E_PROBE_OUTSIDE_DOMAIN
+    with pytest.raises(EngineError) as excinfo:
+        engine.solve(relaxed_case)
+    assert [p.code for p in excinfo.value.problems] == [E_PROBE_OUTSIDE_DOMAIN]
+
+    # Probe domain errors must precede the accuracy gate (E_ACCURACY_UNREACHABLE).
+    tight_case = replace(base, name="probe_outside_domain_tight", probes=(out_probe,))
+    tight_errors = [p for p in engine.validate(tight_case) if p.is_error]
+    assert [p.code for p in tight_errors] == [E_PROBE_OUTSIDE_DOMAIN]
+    with pytest.raises(EngineError) as tight_exc:
+        engine.solve(tight_case)
+    assert [p.code for p in tight_exc.value.problems] == [E_PROBE_OUTSIDE_DOMAIN]
+
+    # Structural errors still take precedence over probe domain errors.
+    cyl = CORPUS["cylinder_axis_Bz"]
+    off_axis_with_far_probe = replace(
+        cyl,
+        name="off_axis_with_far_probe",
+        components=(replace(cyl.components[0], center=(0.05, 0.0, 0.0)),),
+        probes=(out_probe,),
+        expected=(replace(cyl.expected[0], tolerance=0.05),),
+        tolerance=0.05,
+    )
+    struct_errors = [p for p in engine.validate(off_axis_with_far_probe) if p.is_error]
+    assert [p.code for p in struct_errors] == ["E_NOT_AXISYMMETRIC"]

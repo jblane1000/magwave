@@ -64,6 +64,7 @@ E_ACCURACY_UNREACHABLE = "E_ACCURACY_UNREACHABLE"
 E_PROBE_OUTSIDE_DOMAIN = "E_PROBE_OUTSIDE_DOMAIN"
 E_NOT_CONVERGED = "E_NOT_CONVERGED"
 E_MESH_NODE_BUDGET = "E_MESH_NODE_BUDGET"
+E_UNSUPPORTED_OFF_AXIS_PERMEABLE = "E_UNSUPPORTED_OFF_AXIS_PERMEABLE"
 
 _AXIS_TOL = 1e-12
 
@@ -387,6 +388,19 @@ class Fem2dEngine:
                         )
                     )
                     continue
+                rc = math.hypot(component.center[0], component.center[1])
+                if rc > _AXIS_TOL:
+                    problems.append(
+                        Problem(
+                            E_UNSUPPORTED_OFF_AXIS_PERMEABLE,
+                            f"{case.name}: {label} is centred at {component.center}, off the z "
+                            "symmetry axis (r > 0); the axisymmetric A_phi formulation can only "
+                            "represent bodies on the axis — place the body on the axis "
+                            "(x = y = 0) or wait for CAD meshing (M7); nothing was solved.",
+                            "error",
+                        )
+                    )
+                    continue
                 try:
                     mat, _ = load_library().with_override(component.material, component.mu_r)
                 except ValueError as exc:
@@ -602,7 +616,8 @@ class Fem2dEngine:
                         )
                     )
 
-        # 3. Mesh node budget check before accuracy gate (only when otherwise solvable).
+        # 3. Probe domain bounds and mesh node budget before accuracy gate
+        # (only when otherwise solvable).
         if not any(problem.is_error for problem in problems):
             (
                 r_max,
@@ -615,6 +630,7 @@ class Fem2dEngine:
                 _,
                 probe_problems,
             ) = self._mesh_parameters(case)
+            problems.extend(probe_problems)
             if not probe_problems:
                 try:
                     check_rectangular_mesh_budget(

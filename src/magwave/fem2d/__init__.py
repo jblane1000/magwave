@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 from .assembly import load_current_density, load_magnetization_offset, load_sheet, stiffness
-from .engine import E_MESH_NODE_BUDGET, E_NOT_CONVERGED, ENGINE_ID, RUNG, Fem2dEngine
+from .engine import (
+    E_MESH_NODE_BUDGET,
+    E_NOT_CONVERGED,
+    E_UNSUPPORTED_OFF_AXIS_PERMEABLE,
+    ENGINE_ID,
+    RUNG,
+    Fem2dEngine,
+)
 from .field import element_field, sample_field
 from .force import (
     E_FORCE_CONTOUR_DOES_NOT_ENCLOSE,
@@ -51,6 +58,7 @@ __all__ = [
     "E_MESH_NODE_BUDGET",
     "E_NOT_CONVERGED",
     "E_TORQUE_NOT_MEANINGFUL",
+    "E_UNSUPPORTED_OFF_AXIS_PERMEABLE",
     "RUNG",
     "DeltaStep",
     "DeltaStudyResult",
