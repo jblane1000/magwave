@@ -385,12 +385,16 @@ def test_converge_non_falling_deltas_warns_and_forces_no(
 
 
 def test_solve_fem2d_probe_output_and_sampling_refusal(
-    capsys: pytest.CaptureFixture[str], steel_direct_1mm: Result
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], steel_direct_1mm: Result
 ) -> None:
-    rc = main(["solve", str(STEEL_EXAMPLE), "--engine", "fem2d"])
+    # FR-002: solve writes its results artefacts and announces both paths on stderr. The
+    # artefacts go to tmp_path so a test run never leaves files beside a tracked example.
+    rc = main(["solve", str(STEEL_EXAMPLE), "--engine", "fem2d", "--results-dir", str(tmp_path)])
     cap = capsys.readouterr()
     assert rc == 0, cap.err
-    assert cap.err == ""
+    results_json = tmp_path / "steel-cylinder-solenoid-nonlinear.results.json"
+    results_csv = tmp_path / "steel-cylinder-solenoid-nonlinear.results.csv"
+    assert cap.err == f"{results_json}\n{results_csv}\n"
     assert cap.out == f"probe #0 (0.0, 0.0, 0.0) m  B  z = {steel_direct_1mm.values()[0]!r} T\n"
 
     for extra in (["--points", "0,0,0"], ["--grid", "0,0.01,0.01:0,0,1:0,0,1"]):
