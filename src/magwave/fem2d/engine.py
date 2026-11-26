@@ -616,7 +616,8 @@ class Fem2dEngine:
                         )
                     )
 
-        # 3. Mesh node budget check before accuracy gate (only when otherwise solvable).
+        # 3. Probe domain bounds and mesh node budget before accuracy gate
+        # (only when otherwise solvable).
         if not any(problem.is_error for problem in problems):
             (
                 r_max,
@@ -629,6 +630,7 @@ class Fem2dEngine:
                 _,
                 probe_problems,
             ) = self._mesh_parameters(case)
+            problems.extend(probe_problems)
             if not probe_problems:
                 try:
                     check_rectangular_mesh_budget(
