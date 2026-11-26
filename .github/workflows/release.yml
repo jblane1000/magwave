@@ -1,0 +1,125 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Licence boundary (NFR-3)
+        run: python tools/check_licence_boundary.py
+      - name: Lint
+        run: ruff check .
+      - name: Format
+        run: ruff format --check .
+      - name: ADR enforcement map
+        run: python tools/adr_check_map.py
+      - name: Tests
+        run: pytest -q
+      - name: Benchmarks (FR-070)
+        run: python -m magwave bench
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Install wheel into clean venv
+        run: |
+          python -m venv "$RUNNER_TEMP/wheelcheck"
+          "$RUNNER_TEMP/wheelcheck/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/wheelcheck/bin/python" -m pip install dist/*.whl
+      - name: Verify wheel import location
+        run: |
+          "$RUNNER_TEMP/wheelcheck/bin/python" -c "import magwave, sys; p=magwave.__file__; print(p); sys.exit(0 if 'site-packages' in p else 1)"
+      - name: Clean-venv magwave --version
+        run: |
+          "$RUNNER_TEMP/wheelcheck/bin/magwave" --version
+      - name: Clean-venv magwave validate
+        run: |
+          "$RUNNER_TEMP/wheelcheck/bin/magwave" validate examples/solve-dipole.json
+      - name: Regenerate benchmarks and check for drift
+        run: |
+          python tools/render_benchmarks.py
+          git diff --exit-code docs/BENCHMARKS.md
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Create clean venv and install wheel
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m venv .venv-clean
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $py = ".venv-clean\Scripts\python.exe"
+          & $py -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheel = (Get-ChildItem dist -Filter *.whl | Select-Object -First 1).FullName
+          if (-not $wheel) { throw "No wheel found in dist/" }
+          & $py -m pip install $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke test magwave --version
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .venv-clean\Scripts\magwave.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke test magwave validate
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .venv-clean\Scripts\magwave.exe validate examples/solve-dipole.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke test magwave solve
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .venv-clean\Scripts\magwave.exe solve examples/solve-dipole.json --points "0,0,0.5" --format json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke test magwave bench
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .venv-clean\Scripts\magwave.exe bench
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [build, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --title "$GITHUB_REF_NAME"
