@@ -8,6 +8,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Results artefact with provenance (FR-002)**: added `magwave.results.write_results` and wired
+  both Tier 0 and Tier 1 `magwave solve` paths (with optional `--results-dir DIR`) to emit
+  deterministic `<stem>.results.json` (`magwave.results/1`) and `<stem>.results.csv` files
+  carrying `app_version`, `engine` id/version, `case` name/basename/`sha256`, `units`, and
+  `samples`, announcing both written paths on `stderr` while keeping `stdout` byte-identical.
 - **M6 — Generated `docs/BENCHMARKS.md` and CI staleness gate (FR-071)**: added
   `tools/render_benchmarks.py` (stdlib-only) to render `docs/BENCHMARKS.md` deterministically from
   `python -m magwave bench --json` and fail CI via `--check` whenever the committed table drifts.

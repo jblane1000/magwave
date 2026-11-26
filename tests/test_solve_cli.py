@@ -75,7 +75,22 @@ def test_json_export_matches_engine_sample_exactly(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = "0,0,0.5; 0.3,0,0.4; -0.1,0.2,0.7"
-    assert main(["solve", str(EXAMPLE), "--format", "json", "--points", spec]) == 0
+    # FR-002: redirect the results artefacts out of examples/, which stays a read-only input tree.
+    assert (
+        main(
+            [
+                "solve",
+                str(EXAMPLE),
+                "--format",
+                "json",
+                "--points",
+                spec,
+                "--results-dir",
+                str(tmp_path),
+            ]
+        )
+        == 0
+    )
     text = capsys.readouterr().out
     payload = json.loads(text)
     assert text == json.dumps(payload, indent=2, sort_keys=True) + "\n"

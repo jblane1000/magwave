@@ -20,6 +20,7 @@ Thumbs.db
 
 # Local runs
 *.mw.results.json
+*.mw.results.csv
 results/
 cases/local/
 

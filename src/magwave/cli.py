@@ -149,6 +149,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help='solve: explicit points "x,y,z; x,y,z; ..." in metres',
     )
+    parser.add_argument(
+        "--results-dir",
+        metavar="DIR",
+        default=None,
+        help="solve: directory for .results.json and .results.csv (default: case directory)",
+    )
     return parser
 
 
@@ -217,6 +223,42 @@ def _write_json_text(path: str, text: str) -> None:
 
 def _write_json(path: str, payload: dict) -> None:
     _write_json_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _validate_results_paths(case_path: str, results_dir: str | None) -> None:
+    """Validate that both solve results artefact paths are writable before solving."""
+    from .results import results_paths
+
+    if results_dir is not None and (not results_dir or not results_dir.strip()):
+        raise _OutputPathError(results_dir, "path is empty (not writable)")
+    json_path, csv_path = results_paths(case_path, results_dir)
+    _validate_json_output_path(str(json_path))
+    _validate_json_output_path(str(csv_path))
+
+
+def _write_solve_results(
+    case_path: str,
+    case,
+    capabilities,
+    samples,
+    results_dir: str | None,
+) -> None:
+    """Write ``.results.json`` and ``.results.csv`` and announce both paths on stderr."""
+    from .results import results_paths, write_results
+
+    try:
+        json_path, csv_path = write_results(
+            case_path,
+            case,
+            capabilities,
+            samples,
+            results_dir=results_dir,
+        )
+    except OSError as exc:
+        target = results_dir if results_dir is not None else str(results_paths(case_path, None)[0])
+        raise _OutputPathError(target, f"not writable ({exc.strerror or exc})") from exc
+    print(json_path, file=sys.stderr)
+    print(csv_path, file=sys.stderr)
 
 
 def _run_bench(json_path: str | None) -> int:
@@ -428,9 +470,15 @@ def _format_json(points: np.ndarray, field: np.ndarray, magnitude: np.ndarray, e
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
-def _run_solve(case_path: str, points: np.ndarray, output_format: str) -> int:
+def _run_solve(
+    case_path: str,
+    points: np.ndarray,
+    output_format: str,
+    *,
+    results_dir: str | None = None,
+) -> int:
     from .cases import Case, CaseError
-    from .engines.base import errors_in
+    from .engines.base import Sample, errors_in
     from .engines.magpylib_engine import MagpylibEngine, field_magnitude
 
     try:
@@ -459,10 +507,22 @@ def _run_solve(case_path: str, points: np.ndarray, output_format: str) -> int:
         for problem in errors:
             print(f"  {problem}", file=sys.stderr)
         return 2
+    _validate_results_paths(case_path, results_dir)
     for problem in problems:
         print(f"magwave solve: {problem}", file=sys.stderr)
     field = engine.sample(case, points)
     magnitude = field_magnitude(field)
+    samples = tuple(
+        Sample(
+            point=(float(pt[0]), float(pt[1]), float(pt[2])),
+            quantity="B",
+            vector=(float(vec[0]), float(vec[1]), float(vec[2])),
+            unit="T",
+            component="magnitude",
+        )
+        for pt, vec in zip(points, field, strict=True)
+    )
+    _write_solve_results(case_path, case, engine.capabilities(), samples, results_dir)
     formatter = _format_csv if output_format == "csv" else _format_json
     sys.stdout.write(formatter(points, field, magnitude, engine))
     return 0
@@ -473,10 +533,12 @@ def _run_solve_fem2d(
     *,
     element_size: float | None = None,
     max_iterations: int | None = None,
+    results_dir: str | None = None,
 ) -> int:
     case = _load_case_for_cli(case_path, "solve")
     if case is None:
         return 2
+    _validate_results_paths(case_path, results_dir)
     material_model = _detect_fem2d_material_model(case)
     effective_size = _resolve_element_size(case, element_size)
     engine = _make_engine(
@@ -488,6 +550,7 @@ def _run_solve_fem2d(
     result = engine.solve(case)
     for problem in result.problems:
         print(f"magwave solve: {problem}", file=sys.stderr)
+    _write_solve_results(case_path, case, engine.capabilities(), result.samples, results_dir)
     for index, (probe, sample) in enumerate(zip(case.probes, result.samples, strict=True)):
         point_text = ", ".join(repr(float(coord)) for coord in probe.point)
         value = float(result.value(index, probe.component))
@@ -844,6 +907,7 @@ def _dispatch(
                 args.case,
                 element_size=element_size,
                 max_iterations=args.max_iterations,
+                results_dir=args.results_dir,
             )
         if (args.grid is None) == (args.points is None):
             parser.error("solve: exactly one of --grid or --points is required")
@@ -851,7 +915,12 @@ def _dispatch(
             points = parse_grid(args.grid) if args.grid is not None else parse_points(args.points)
         except ValueError as exc:
             parser.error(str(exc))
-        return _run_solve(args.case, points, args.format or "csv")
+        return _run_solve(
+            args.case,
+            points,
+            args.format or "csv",
+            results_dir=args.results_dir,
+        )
     if args.command == "report":
         if args.json is not None or args.format or args.grid or args.points:
             parser.error("report: --json, --format, --grid and --points do not apply to report")
@@ -946,8 +1015,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(
             f"{args.command}: case path applies to solve, report, converge, gui and import"
         )
-    if args.command != "solve" and (args.grid or args.points or args.format):
-        parser.error(f"{args.command}: --format, --grid and --points apply to solve")
+    if args.command != "solve" and (
+        args.grid or args.points or args.format or args.results_dir is not None
+    ):
+        parser.error(f"{args.command}: --format, --grid, --points and --results-dir apply to solve")
     if args.command != "import" and args.role:
         parser.error(f"{args.command}: --role applies to import only")
     if args.command != "import" and args.defeature_below is not None:
