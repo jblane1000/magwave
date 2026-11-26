@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magwave"
-version = "0.0.1"
+version = "0.1.0"
 description = "Open-source 3D magnetic field simulator for permanent magnets, coils and steel."
 readme = "README.md"
 requires-python = ">=3.11"
