@@ -69,6 +69,27 @@ See [docs/adr/0002-licence-strategy.md](docs/adr/0002-licence-strategy.md).
 - [docs/adr/](docs/adr/) — decision records (stack, licence, engines, UI, validation).
 - [docs/CHECKLISTS/](docs/CHECKLISTS/) — release, validation, mesh quality, CAD import.
 
+## Prerequisites
+
+Before cloning and creating a virtual environment:
+
+- **Base tools:** Python 3.12 or newer, `git`, and `python3-venv`. On Ubuntu / Debian:
+
+  ```bash
+  sudo apt-get update && sudo apt-get install -y git python3-venv
+  ```
+
+- **Desktop GUI system libraries:** Installing the Python `[gui]` extra (`pip install -e ".[gui]"`) alone is **not** sufficient on a minimal Linux or container image, because Qt 6 (`PySide6`) and VTK (`pyvista`) dynamically link system OpenGL, GLib, font, and windowing shared libraries. On Ubuntu 24.04 (verified in a clean `ubuntu:24.04` container running `tools/gui_walkthrough.py`), install:
+
+  ```bash
+  sudo apt-get install -y --no-install-recommends \
+    libgl1 libegl1 libglib2.0-0 libfontconfig1 libxkbcommon0 libdbus-1-3 libxrender1
+  ```
+
+  In particular, `libgl1` provides `libGL.so.1`, `libglib2.0-0` provides `libglib-2.0.so.0`, and `libfontconfig1` pulls `libfontconfig.so.1` and `libfreetype.so.6`.
+
+- **Headless / CLI users:** None of these GUI system libraries (or the `[gui]` extra) are needed for the CLI (`validate`, `run`, `solve`, `export`, `report`, `bench`, `converge`). If you are running headless without the desktop window, you can skip the GUI system packages entirely.
+
 ## Quickstart
 
 This walkthrough uses the shipped point-dipole example (`examples/solve-dipole.json`) and runs offline from a fresh checkout.

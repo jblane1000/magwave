@@ -6,6 +6,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Truthful GUI dependency diagnosis (`magwave.gui.require_gui`, FR-061)**: split `MissingGuiError` messages between a genuinely absent `[gui]` extra (`ModuleNotFoundError`) and a missing OS shared library (`ImportError` naming a `.so` file such as `libGL.so.1` or `libglib-2.0.so.0`), preserving the original error as `__cause__`, forwarding the diagnosis through `magwave gui`, and documenting Ubuntu 24.04 base and Qt 6 prerequisites in `README.md`.
+
 ### Added
 
 - **Headless CLI commands `validate`, `run`, and `export` (FR-060, FR-002, FR-050)**:

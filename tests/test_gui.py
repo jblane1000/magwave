@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import magpylib as magpy
@@ -33,9 +34,11 @@ from magwave.engines.base import Capabilities, EngineError, Problem, Result
 from magwave.gui import (
     MISSING_GUI_MESSAGE,
     MainWindow,
+    MissingGuiError,
     Steel,
     _build_qt_classes,
     launch_gui,
+    require_gui,
     with_component,
 )
 from magwave.report import render_report
@@ -365,3 +368,96 @@ def test_unassigned_manifest_blocks_gui_run_case(qtbot) -> None:
     assert window.result is None
     assert window.shown_probe_values() == ()
     assert any("E_UNASSIGNED_BODIES" in msg for msg in window.problem_messages())
+
+
+def _install_fake_qt_so_error(monkeypatch: pytest.MonkeyPatch, lib_name: str) -> None:
+    """Inject a fake ``PySide6`` module whose Qt submodule import raises a missing ``.so`` error."""
+    for mod_name in ("PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"):
+        monkeypatch.delitem(sys.modules, mod_name, raising=False)
+
+    fake_pyside6 = types.ModuleType("PySide6")
+    fake_pyside6.__path__ = []
+
+    def _getattr(name: str) -> object:
+        raise ImportError(f"{lib_name}: cannot open shared object file: No such file or directory")
+
+    fake_pyside6.__getattr__ = _getattr  # type: ignore[method-assign]
+    monkeypatch.setitem(sys.modules, "PySide6", fake_pyside6)
+    monkeypatch.setitem(sys.modules, "pyvista", types.ModuleType("pyvista"))
+
+
+@pytest.mark.parametrize("blocked_module", ["PySide6", "pyvista"])
+def test_require_gui_absent_extra_reports_not_installed_and_preserves_cause(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked_module: str,
+) -> None:
+    monkeypatch.setitem(sys.modules, blocked_module, None)
+
+    with pytest.raises(MissingGuiError) as excinfo:
+        require_gui()
+
+    message = str(excinfo.value)
+    assert message == MISSING_GUI_MESSAGE
+    assert "not installed" in message
+    assert 'pip install "magwave[gui]"' in message
+    assert isinstance(excinfo.value.__cause__, ModuleNotFoundError)
+
+
+@pytest.mark.parametrize(
+    ("lib_name", "ubuntu_pkg"),
+    [
+        ("libGL.so.1", "libgl1"),
+        ("libglib-2.0.so.0", "libglib2.0-0"),
+        ("libxkbcommon.so.0", "libxkbcommon0"),
+        ("libfreetype.so.6", "libfreetype6"),
+        ("libfontconfig.so.1", "libfontconfig1"),
+    ],
+)
+def test_require_gui_missing_system_library_names_library_and_package(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    lib_name: str,
+    ubuntu_pkg: str,
+) -> None:
+    _install_fake_qt_so_error(monkeypatch, lib_name)
+
+    with pytest.raises(MissingGuiError) as excinfo:
+        require_gui()
+
+    message = str(excinfo.value)
+    assert lib_name in message
+    assert ubuntu_pkg in message
+    assert "system package problem" in message
+    assert "apt-get install" in message
+    for forbidden in ("not installed", "pip install", "magwave[gui]", "install the extra"):
+        assert forbidden not in message
+    assert isinstance(excinfo.value.__cause__, ImportError)
+    assert lib_name in str(excinfo.value.__cause__)
+    assert "cannot open shared object file" in str(excinfo.value.__cause__)
+
+    code = main(["gui", str(EXAMPLE)])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert captured.out == ""
+    err_lines = captured.err.splitlines()
+    assert len(err_lines) == 1
+    assert err_lines[0] == message
+
+
+def test_require_gui_missing_unknown_system_library_blames_system_package(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lib_name = "libcustom-qt.so.9"
+    _install_fake_qt_so_error(monkeypatch, lib_name)
+
+    with pytest.raises(MissingGuiError) as excinfo:
+        require_gui()
+
+    message = str(excinfo.value)
+    assert lib_name in message
+    assert "system package problem" in message
+    assert "apt-get install" in message
+    for forbidden in ("not installed", "pip install", "magwave[gui]", "install the extra"):
+        assert forbidden not in message
+    assert isinstance(excinfo.value.__cause__, ImportError)
+    assert lib_name in str(excinfo.value.__cause__)
