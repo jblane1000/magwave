@@ -9,6 +9,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 - **Refuse off-axis `permeable` bodies in Tier 1 (`E_UNSUPPORTED_OFF_AXIS_PERMEABLE`)**: `Fem2dEngine.validate()` now rejects any `permeable` component with `hypot(x, y) > 1e-12` before solving or writing results artefacts, rather than silently revolving it into an off-axis torus in axisymmetric `A_phi`.
+- **Remove tautological 8-sector axisymmetry check in `maxwell_force`**: removed the dead `mean(cos(phis))` / `mean(sin(phis))` assertion and updated the `magwave.fem2d.force` docstring and `ForceResult.notes` so they no longer claim a numerical 8-sector check; documented why the meridional radial traction integral is physically non-zero (`|F_r|/|F_z|` in `0.360`–`1.055` across shipped force cases due to the cylindrical `T_phiphi` metric term).
 
 ## [0.1.0] - 2026-11-25
 

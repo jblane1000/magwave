@@ -657,3 +657,22 @@ def test_delta_ladder_analysis_exact_order_and_edge_cases() -> None:
     assert nonmono_res.monotonic is False
     assert nonmono_res.asymptotic is False
     assert nonmono_res.f_extrapolated_n is None
+
+
+def test_maxwell_force_notes_and_docstring_do_not_claim_sector_check() -> None:
+    """Force module docstring and ForceResult notes do not claim a tautological 8-sector check."""
+    force_mod = sys.modules[maxwell_force.__module__]
+    assert "8 azimuthal sectors" not in (force_mod.__doc__ or "")
+
+    res = maxwell_force(
+        build_coaxial_loops_case(),
+        Fem2dEngine(element_size=1.0e-3),
+        target="coil_top",
+    )
+    assert not any("axisymmetry check" in note for note in res.notes)
+    assert not any("8 sectors" in note for note in res.notes)
+    assert any(
+        "by axisymmetric A_phi construction" in note
+        and "meridional radial traction integral=" in note
+        for note in res.notes
+    )
