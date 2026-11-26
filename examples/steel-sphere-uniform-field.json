@@ -32,6 +32,9 @@
       "value": 0.0369599
     }
   ],
+  "frame": {
+    "axis": "z"
+  },
   "name": "steel_sphere_uniform_field",
   "probes": [
     {
@@ -44,10 +47,16 @@
       "quantity": "B"
     }
   ],
-  "schema": "magwave.case/1",
+  "schema": "magwave.case/2",
   "sources": [
     "Jackson, Classical Electrodynamics, 3rd ed., §5.10; Landau & Lifshitz, Electrodynamics of Continuous Media, §8 (analytic permeable sphere in uniform field)",
     "Compumag TEAM 20 material provenance (magwave.materials v1 steel-team20: shipped mu_r = 294.7, overridden to mu_r = 100.0 for this linear benchmark)"
   ],
-  "tolerance": 0.01
+  "tolerance": 0.01,
+  "units": {
+    "current": "A",
+    "field": "T",
+    "force": "N",
+    "length": "m"
+  }
 }

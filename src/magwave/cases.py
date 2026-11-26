@@ -1,16 +1,18 @@
 """Case model — the unit of reproducibility for MagWave.
 
-A case carries the sources, the probe locations, the expected numbers and the tolerance
-each number is allowed, in one document that round-trips through JSON without loss
-(PRD FR-001/FR-002). Geometry is metres and amperes throughout (NFR-2); convert at the
-boundary with :mod:`magwave.units`.
+A case carries the sources, the probe locations, the expected numbers, the tolerance
+each number is allowed, the declared unit system, and the reference frame in one
+document that round-trips through JSON without loss (PRD FR-001/FR-002/FR-003).
+Internally, the model stores SI units throughout (metres, amperes, tesla, newtons;
+NFR-2) and converts at the JSON boundary.
 
-Why the validation is strict: a case file that silently drops or ignores a field produces
-a plausible-looking wrong number, which PRD NFR-8 names as the worst possible outcome. So
-unknown keys, missing required fields and widened tolerances are all errors, never
-defaults.
+Why the validation is strict: a case file that silently drops, ignores, or guesses a
+unit or axis produces a plausible-looking wrong number, which PRD NFR-8 names as the
+worst possible outcome. So unknown keys, missing required fields, mixed units,
+unsupported units, unsupported symmetry axes, and widened tolerances are all errors,
+never defaults.
 
-JSON schema ``magwave.case/1``
+JSON schema ``magwave.case/2``
 ------------------------------
 Keys are emitted in sorted order at every level, so a re-serialisation of a loaded case is
 byte-identical. Unknown keys are rejected at every level.
@@ -19,30 +21,42 @@ byte-identical. Unknown keys are rejected at every level.
       "components": [<component>, ...],      # at least one source
       "description": "<why this case exists>",
       "expected": [<expected>, ...],         # at least one expected value
+      "frame": {"axis": "z"[, "datum_face": "<optional text>"]},
       "name": "<unique case name>",
       "probes": [<probe>, ...],              # at least one probe
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": ["<provenance>", ...],
-      "tolerance": <relative>                # must equal the tightest expected tolerance
-      [, "mesh": {"element_size": <metres>}] # optional FEM element size in metres
+      "tolerance": <relative>,               # must equal the tightest expected tolerance
+      "units": {"current": "A", "field": "T" | "mT", "force": "N" | "mN", "length": "m" | "mm"}
+      [, "mesh": {"element_size": <units.length>}] # optional FEM element size
       [, "temperature_c": <deg C>]           # optional operating temperature (omitted when null or 20.0)
     }
 
+Boundary scaling (``units``) applies to:
+  * ``units.length`` (``m``, ``mm``): component ``dims`` and ``center``, probe ``point``,
+    and ``mesh.element_size``.
+  * ``units.field`` (``T``, ``mT``): magnet ``br`` and ``expected[].value`` for ``B``
+    quantities.
+  * ``units.force`` (``N``, ``mN``): ``expected[].value`` for ``F`` quantities.
+  * ``units.current`` (``A`` only): ``coil.current`` (in A).
+  * Not scaled (always SI, no declared unit key): ``uniform_field.h0`` (A/m) and
+    ``dipole.moment`` (A m^2).
+
     <component> — one of five, discriminated by "type":
       magnet:        {"type": "magnet", "kind": "cuboid" | "cylinder" | "halbach_cylinder",
-                      "dims": {...metres...}, "br": [bx, by, bz]  # tesla
+                      "dims": {...units.length...}, "br": [bx, by, bz]  # units.field
                       [, "center": [x, y, z], "demag_curve": null | "ref", "name": ""]}
       coil:          {"type": "coil", "kind": "loop" | "solenoid",
-                      "dims": {...metres...}, "current": <A>, "turns": <int>
+                      "dims": {...units.length...}, "current": <A>, "turns": <int>
                       [, "center": [x, y, z], "name": ""]}
       dipole:        {"type": "dipole", "moment": [mx, my, mz]  # A m^2
                       [, "center": [x, y, z], "name": ""]}
       permeable:     {"type": "permeable", "kind": "sphere" | "cylinder" | "block",
-                      "dims": {...metres...}, "material": "<library name>"
+                      "dims": {...units.length...}, "material": "<library name>"
                       [, "center": [x, y, z], "mu_r": <float>, "name": ""]}
       uniform_field: {"type": "uniform_field", "h0": <A/m> [, "name": ""]}
 
-    dims by kind (metres):
+    dims by kind (in ``units.length``):
       cuboid           {"size_x", "size_y", "size_z"}
       cylinder         {"radius", "length"}
       halbach_cylinder {"inner_radius", "outer_radius"}
@@ -56,7 +70,7 @@ byte-identical. Unknown keys are rejected at every level.
     <probe>    = {"point": [x, y, z], "quantity": "B" | "F",
                   "component": "x" | "y" | "z" | "magnitude"}
     <expected> = {"check": "<analytic check id>", "quantity": "<label>",
-                  "unit": "T" | "N", "value": <number>,
+                  "unit": "T" | "mT" | "N" | "mN", "value": <number>,
                   "tolerance": <relative>, "source": "<provenance>"}
 """
 
@@ -65,12 +79,22 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, NoReturn
 
 from .cad.manifest import Manifest
 
-SCHEMA = "magwave.case/1"
+SCHEMA = "magwave.case/2"
+
+SUPPORTED_LENGTH_UNITS: dict[str, int] = {"m": 0, "mm": -3}
+SUPPORTED_FIELD_UNITS: dict[str, int] = {"T": 0, "mT": -3}
+SUPPORTED_CURRENT_UNITS: dict[str, int] = {"A": 0}
+SUPPORTED_FORCE_UNITS: dict[str, int] = {"N": 0, "mN": -3}
+SUPPORTED_EXPECTED_UNITS: tuple[str, ...] = ("N", "T", "mN", "mT")
+
+FRAME_AXES: tuple[str, ...] = ("x", "y", "z")
+SUPPORTED_FRAME_AXES: tuple[str, ...] = ("z",)
 
 MAGNET_DIMS: dict[str, tuple[str, ...]] = {
     "cuboid": ("size_x", "size_y", "size_z"),
@@ -164,14 +188,42 @@ def _triple(value: Any, where: str) -> tuple[float, float, float]:
     )
 
 
-def _dims(value: Any, where: str, required: Sequence[str]) -> dict[str, float]:
+def _scale_power10(value: float, exp10: int) -> float:
+    if exp10 == 0:
+        return value
+    return float(Decimal(str(value)).scaleb(exp10))
+
+
+def _scale_triple(triple: tuple[float, float, float], exp10: int) -> tuple[float, float, float]:
+    if exp10 == 0:
+        return triple
+    return (
+        _scale_power10(triple[0], exp10),
+        _scale_power10(triple[1], exp10),
+        _scale_power10(triple[2], exp10),
+    )
+
+
+def _scale_dims(dims: Mapping[str, float], exp10: int) -> dict[str, float]:
+    if exp10 == 0:
+        return dict(dims)
+    return {key: _scale_power10(value, exp10) for key, value in dims.items()}
+
+
+def _dims(
+    value: Any,
+    where: str,
+    required: Sequence[str],
+    *,
+    unit_label: str = "metres",
+) -> dict[str, float]:
     data = _mapping(value, where)
     _keys(data, where, required)
     out: dict[str, float] = {}
     for key in required:
         size = _number(data[key], f"{where}.{key}")
         if size <= 0.0:
-            _fail(f"{where}.{key}", "must be positive (dimensions are metres)")
+            _fail(f"{where}.{key}", f"must be positive (dimensions are {unit_label})")
         out[key] = size
     return _sorted(out)
 
@@ -188,6 +240,105 @@ def _optional_name(value: Any, where: str) -> str:
     if not isinstance(value, str):
         _fail(where, f"expected a string, got {type(value).__name__}")
     return value
+
+
+def _validate_unit(value: Any, where: str, supported: Sequence[str] | Mapping[str, int]) -> str:
+    unit = _text(value, where)
+    if unit not in supported:
+        _fail(where, f"unsupported unit {unit!r} (supported: {', '.join(supported)})")
+    return unit
+
+
+def _validate_frame_axis(value: Any, where: str) -> str:
+    axis = _text(value, where)
+    if axis not in FRAME_AXES:
+        _fail(where, f"expected one of {list(FRAME_AXES)}, got {axis!r}")
+    if axis not in SUPPORTED_FRAME_AXES:
+        _fail(
+            where,
+            f"axis {axis!r} is not supported; only 'z' is supported at Tier 1 "
+            "(rotation is not implemented)",
+        )
+    return axis
+
+
+# --------------------------------------------------------------------------------------
+# units and frame declarations
+# --------------------------------------------------------------------------------------
+@dataclass(frozen=True)
+class UnitSpec:
+    """Declared boundary unit system for a case document."""
+
+    length: str = "m"
+    field: str = "T"
+    current: str = "A"
+    force: str = "N"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "length", _validate_unit(self.length, "case.units.length", SUPPORTED_LENGTH_UNITS)
+        )
+        object.__setattr__(
+            self, "field", _validate_unit(self.field, "case.units.field", SUPPORTED_FIELD_UNITS)
+        )
+        object.__setattr__(
+            self,
+            "current",
+            _validate_unit(self.current, "case.units.current", SUPPORTED_CURRENT_UNITS),
+        )
+        object.__setattr__(
+            self, "force", _validate_unit(self.force, "case.units.force", SUPPORTED_FORCE_UNITS)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _sorted(
+            {
+                "length": self.length,
+                "field": self.field,
+                "current": self.current,
+                "force": self.force,
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, data: Any, where: str = "case.units") -> UnitSpec:
+        doc = _mapping(data, where)
+        _keys(doc, where, ("length", "field", "current", "force"))
+        return cls(
+            length=_validate_unit(doc["length"], f"{where}.length", SUPPORTED_LENGTH_UNITS),
+            field=_validate_unit(doc["field"], f"{where}.field", SUPPORTED_FIELD_UNITS),
+            current=_validate_unit(doc["current"], f"{where}.current", SUPPORTED_CURRENT_UNITS),
+            force=_validate_unit(doc["force"], f"{where}.force", SUPPORTED_FORCE_UNITS),
+        )
+
+
+@dataclass(frozen=True)
+class FrameSpec:
+    """Declared coordinate frame and rotational symmetry axis for a case document."""
+
+    axis: str = "z"
+    datum_face: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "axis", _validate_frame_axis(self.axis, "case.frame.axis"))
+        object.__setattr__(
+            self, "datum_face", _optional_name(self.datum_face, "case.frame.datum_face")
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"axis": self.axis}
+        if self.datum_face:
+            payload["datum_face"] = self.datum_face
+        return _sorted(payload)
+
+    @classmethod
+    def from_dict(cls, data: Any, where: str = "case.frame") -> FrameSpec:
+        doc = _mapping(data, where)
+        _keys(doc, where, ("axis",), ("datum_face",))
+        return cls(
+            axis=_validate_frame_axis(doc["axis"], f"{where}.axis"),
+            datum_face=_optional_name(doc.get("datum_face", ""), f"{where}.datum_face"),
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -223,21 +374,29 @@ class Magnet:
             object.__setattr__(self, "demag_curve", _text(self.demag_curve, "magnet.demag_curve"))
         object.__setattr__(self, "name", _name(self.name, "magnet.name"))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, length_exp10: int = 0, field_exp10: int = 0) -> dict[str, Any]:
         return _sorted(
             {
                 "type": "magnet",
                 "name": self.name,
                 "kind": self.kind,
-                "dims": dict(self.dims),
-                "br": list(self.br),
-                "center": list(self.center),
+                "dims": _scale_dims(self.dims, length_exp10),
+                "br": list(_scale_triple(self.br, field_exp10)),
+                "center": list(_scale_triple(self.center, length_exp10)),
                 "demag_curve": self.demag_curve,
             }
         )
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "magnet") -> Magnet:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "magnet",
+        *,
+        length_exp10: int = 0,
+        field_exp10: int = 0,
+        length_unit: str = "metres",
+    ) -> Magnet:
         doc = _mapping(data, where)
         _keys(
             doc,
@@ -247,11 +406,17 @@ class Magnet:
         )
         if doc["type"] != "magnet":
             _fail(where, f"expected type 'magnet', got {doc['type']!r}")
+        kind = _text(doc["kind"], f"{where}.kind")
+        if kind not in MAGNET_DIMS:
+            _fail(f"{where}.kind", f"expected one of {sorted(MAGNET_DIMS)}, got {kind!r}")
+        dims = _dims(doc["dims"], f"{where}.dims", MAGNET_DIMS[kind], unit_label=length_unit)
+        br = _triple(doc["br"], f"{where}.br")
+        center = _triple(doc.get("center", (0.0, 0.0, 0.0)), f"{where}.center")
         return cls(
-            kind=_text(doc["kind"], f"{where}.kind"),
-            dims=doc["dims"],
-            br=doc["br"],
-            center=tuple(doc.get("center", (0.0, 0.0, 0.0))),
+            kind=kind,
+            dims=_scale_dims(dims, length_exp10),
+            br=_scale_triple(br, field_exp10),
+            center=_scale_triple(center, length_exp10),
             demag_curve=doc.get("demag_curve"),
             name=doc.get("name", ""),
         )
@@ -289,31 +454,43 @@ class Coil:
         object.__setattr__(self, "center", _triple(self.center, "coil.center"))
         object.__setattr__(self, "name", _name(self.name, "coil.name"))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, length_exp10: int = 0) -> dict[str, Any]:
         return _sorted(
             {
                 "type": "coil",
                 "name": self.name,
                 "kind": self.kind,
-                "dims": dict(self.dims),
+                "dims": _scale_dims(self.dims, length_exp10),
                 "current": self.current,
                 "turns": self.turns,
-                "center": list(self.center),
+                "center": list(_scale_triple(self.center, length_exp10)),
             }
         )
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "coil") -> Coil:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "coil",
+        *,
+        length_exp10: int = 0,
+        length_unit: str = "metres",
+    ) -> Coil:
         doc = _mapping(data, where)
         _keys(doc, where, ("type", "kind", "dims", "current", "turns"), ("center", "name"))
         if doc["type"] != "coil":
             _fail(where, f"expected type 'coil', got {doc['type']!r}")
+        kind = _text(doc["kind"], f"{where}.kind")
+        if kind not in COIL_DIMS:
+            _fail(f"{where}.kind", f"expected one of {sorted(COIL_DIMS)}, got {kind!r}")
+        dims = _dims(doc["dims"], f"{where}.dims", COIL_DIMS[kind], unit_label=length_unit)
+        center = _triple(doc.get("center", (0.0, 0.0, 0.0)), f"{where}.center")
         return cls(
-            kind=_text(doc["kind"], f"{where}.kind"),
-            dims=doc["dims"],
+            kind=kind,
+            dims=_scale_dims(dims, length_exp10),
             current=doc["current"],
             turns=doc["turns"],
-            center=tuple(doc.get("center", (0.0, 0.0, 0.0))),
+            center=_scale_triple(center, length_exp10),
             name=doc.get("name", ""),
         )
 
@@ -334,25 +511,33 @@ class Dipole:
         object.__setattr__(self, "center", _triple(self.center, "dipole.center"))
         object.__setattr__(self, "name", _name(self.name, "dipole.name"))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, length_exp10: int = 0) -> dict[str, Any]:
         return _sorted(
             {
                 "type": "dipole",
                 "name": self.name,
                 "moment": list(self.moment),
-                "center": list(self.center),
+                "center": list(_scale_triple(self.center, length_exp10)),
             }
         )
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "dipole") -> Dipole:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "dipole",
+        *,
+        length_exp10: int = 0,
+    ) -> Dipole:
         doc = _mapping(data, where)
         _keys(doc, where, ("type", "moment"), ("center", "name"))
         if doc["type"] != "dipole":
             _fail(where, f"expected type 'dipole', got {doc['type']!r}")
+        moment = _triple(doc["moment"], f"{where}.moment")
+        center = _triple(doc.get("center", (0.0, 0.0, 0.0)), f"{where}.center")
         return cls(
-            moment=tuple(doc["moment"]),
-            center=tuple(doc.get("center", (0.0, 0.0, 0.0))),
+            moment=moment,
+            center=_scale_triple(center, length_exp10),
             name=doc.get("name", ""),
         )
 
@@ -392,13 +577,13 @@ class Permeable:
             object.__setattr__(self, "mu_r", mu_r_val)
         object.__setattr__(self, "name", _optional_name(self.name, "permeable.name"))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, length_exp10: int = 0) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "type": "permeable",
             "name": self.name,
             "kind": self.kind,
-            "dims": dict(self.dims),
-            "center": list(self.center),
+            "dims": _scale_dims(self.dims, length_exp10),
+            "center": list(_scale_triple(self.center, length_exp10)),
             "material": self.material,
         }
         if self.mu_r is not None:
@@ -406,7 +591,14 @@ class Permeable:
         return _sorted(payload)
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "permeable") -> Permeable:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "permeable",
+        *,
+        length_exp10: int = 0,
+        length_unit: str = "metres",
+    ) -> Permeable:
         doc = _mapping(data, where)
         _keys(
             doc,
@@ -416,13 +608,19 @@ class Permeable:
         )
         if doc["type"] != "permeable":
             _fail(where, f"expected type 'permeable', got {doc['type']!r}")
-        raw_center = doc.get("center", (0.0, 0.0, 0.0))
-        center = tuple(raw_center) if isinstance(raw_center, list) else raw_center
+        kind = _text(doc["kind"], f"{where}.kind")
+        if kind not in PERMEABLE_DIMS:
+            _fail(
+                f"{where}.kind",
+                f"expected one of {sorted(PERMEABLE_DIMS)}, got {kind!r}",
+            )
+        dims = _dims(doc["dims"], f"{where}.dims", PERMEABLE_DIMS[kind], unit_label=length_unit)
+        center = _triple(doc.get("center", (0.0, 0.0, 0.0)), f"{where}.center")
         return cls(
-            kind=_text(doc["kind"], f"{where}.kind"),
-            dims=doc["dims"],
+            kind=kind,
+            dims=_scale_dims(dims, length_exp10),
             material=doc["material"],
-            center=center,
+            center=_scale_triple(center, length_exp10),
             mu_r=doc.get("mu_r"),
             name=doc.get("name", ""),
         )
@@ -465,13 +663,34 @@ COMPONENT_TYPES: dict[str, Any] = {
 }
 
 
-def component_from_dict(data: Any, where: str = "component") -> Component:
+def component_from_dict(
+    data: Any,
+    where: str = "component",
+    *,
+    length_exp10: int = 0,
+    field_exp10: int = 0,
+    length_unit: str = "metres",
+) -> Component:
     """Build a component from its JSON object, rejecting an unknown ``type``."""
     doc = _mapping(data, where)
     kind = doc.get("type")
     if kind not in COMPONENT_TYPES:
         _fail(where, f"unknown component type {kind!r}; expected one of {sorted(COMPONENT_TYPES)}")
-    return COMPONENT_TYPES[kind].from_dict(doc, where)
+    if kind == "magnet":
+        return Magnet.from_dict(
+            doc,
+            where,
+            length_exp10=length_exp10,
+            field_exp10=field_exp10,
+            length_unit=length_unit,
+        )
+    if kind == "coil":
+        return Coil.from_dict(doc, where, length_exp10=length_exp10, length_unit=length_unit)
+    if kind == "permeable":
+        return Permeable.from_dict(doc, where, length_exp10=length_exp10, length_unit=length_unit)
+    if kind == "dipole":
+        return Dipole.from_dict(doc, where, length_exp10=length_exp10)
+    return UniformField.from_dict(doc, where)
 
 
 # --------------------------------------------------------------------------------------
@@ -501,24 +720,59 @@ class Probe:
                 f"expected one of {list(PROBE_COMPONENTS)}, got {self.component!r}",
             )
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, length_exp10: int = 0) -> dict[str, Any]:
         return _sorted(
             {
-                "point": list(self.point),
+                "point": list(_scale_triple(self.point, length_exp10)),
                 "quantity": self.quantity,
                 "component": self.component,
             }
         )
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "probe") -> Probe:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "probe",
+        *,
+        length_exp10: int = 0,
+    ) -> Probe:
         doc = _mapping(data, where)
         _keys(doc, where, ("point", "quantity"), ("component",))
+        point = _triple(doc["point"], f"{where}.point")
         return cls(
-            point=tuple(doc["point"]),
+            point=_scale_triple(point, length_exp10),
             quantity=_text(doc["quantity"], f"{where}.quantity"),
             component=doc.get("component", "magnitude"),
         )
+
+
+def _expected_quantity_kind(quantity: str) -> str | None:
+    stripped = quantity.strip("|")
+    if stripped.startswith("B"):
+        return "field"
+    if stripped.startswith("F"):
+        return "force"
+    return None
+
+
+def _validate_expected_unit(item: ExpectedValue, index: int, units: UnitSpec) -> str:
+    kind = _expected_quantity_kind(item.quantity)
+    if kind is None:
+        kind = "field" if item.unit in SUPPORTED_FIELD_UNITS else "force"
+    if kind == "field":
+        if item.unit != units.field:
+            _fail(
+                f"case.expected[{index}].unit",
+                f"{item.unit!r} contradicts case.units.field = {units.field!r}",
+            )
+        return "field"
+    if item.unit != units.force:
+        _fail(
+            f"case.expected[{index}].unit",
+            f"{item.unit!r} contradicts case.units.force = {units.force!r}",
+        )
+    return "force"
 
 
 @dataclass(frozen=True)
@@ -541,12 +795,7 @@ class ExpectedValue:
         object.__setattr__(self, "check", _text(self.check, "expected.check"))
         object.__setattr__(self, "quantity", _text(self.quantity, "expected.quantity"))
         object.__setattr__(self, "value", _number(self.value, "expected.value"))
-        unit = _text(self.unit, "expected.unit")
-        if unit not in QUANTITY_UNITS.values():
-            _fail(
-                "expected.unit",
-                f"expected one of {sorted(set(QUANTITY_UNITS.values()))}, got {unit!r}",
-            )
+        unit = _validate_unit(self.unit, "expected.unit", SUPPORTED_EXPECTED_UNITS)
         object.__setattr__(self, "unit", unit)
         tolerance = _number(self.tolerance, "expected.tolerance")
         if tolerance <= 0.0:
@@ -554,12 +803,12 @@ class ExpectedValue:
         object.__setattr__(self, "tolerance", tolerance)
         object.__setattr__(self, "source", _text(self.source, "expected.source"))
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self, *, value_exp10: int = 0) -> dict[str, Any]:
         return _sorted(
             {
                 "check": self.check,
                 "quantity": self.quantity,
-                "value": self.value,
+                "value": _scale_power10(self.value, value_exp10),
                 "unit": self.unit,
                 "tolerance": self.tolerance,
                 "source": self.source,
@@ -567,14 +816,22 @@ class ExpectedValue:
         )
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "expected") -> ExpectedValue:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "expected",
+        *,
+        value_exp10: int = 0,
+    ) -> ExpectedValue:
         doc = _mapping(data, where)
         _keys(doc, where, ("check", "quantity", "value", "unit", "tolerance", "source"))
+        unit = _validate_unit(doc["unit"], f"{where}.unit", SUPPORTED_EXPECTED_UNITS)
+        value = _scale_power10(_number(doc["value"], f"{where}.value"), value_exp10)
         return cls(
             check=doc["check"],
             quantity=doc["quantity"],
-            value=doc["value"],
-            unit=doc["unit"],
+            value=value,
+            unit=unit,
             tolerance=doc["tolerance"],
             source=doc["source"],
         )
@@ -593,15 +850,21 @@ class MeshSpec:
         size = _positive_finite_size(self.element_size, "mesh.element_size")
         object.__setattr__(self, "element_size", size)
 
-    def to_dict(self) -> dict[str, Any]:
-        return {"element_size": self.element_size}
+    def to_dict(self, *, length_exp10: int = 0) -> dict[str, Any]:
+        return {"element_size": _scale_power10(self.element_size, length_exp10)}
 
     @classmethod
-    def from_dict(cls, data: Any, where: str = "mesh") -> MeshSpec:
+    def from_dict(
+        cls,
+        data: Any,
+        where: str = "mesh",
+        *,
+        length_exp10: int = 0,
+    ) -> MeshSpec:
         doc = _mapping(data, where)
         _keys(doc, where, ("element_size",))
         size = _positive_finite_size(doc["element_size"], f"{where}.element_size")
-        return cls(element_size=size)
+        return cls(element_size=_scale_power10(size, length_exp10))
 
 
 @dataclass(frozen=True)
@@ -623,10 +886,17 @@ class Case:
     manifest: Manifest | None = None
     temperature_c: float | None = None
     mesh: MeshSpec | None = None
+    units: UnitSpec = field(default_factory=UnitSpec)
+    frame: FrameSpec = field(default_factory=FrameSpec)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "name", _text(self.name, "case.name"))
         object.__setattr__(self, "description", _text(self.description, "case.description"))
+
+        if not isinstance(self.units, UnitSpec):
+            _fail("case.units", f"expected UnitSpec, got {type(self.units).__name__}")
+        if not isinstance(self.frame, FrameSpec):
+            _fail("case.frame", f"expected FrameSpec, got {type(self.frame).__name__}")
 
         if isinstance(self.sources, str) or not isinstance(self.sources, Sequence):
             _fail("case.sources", "expected a list of strings")
@@ -657,9 +927,10 @@ class Case:
         for probe in probes:
             if not isinstance(probe, Probe):
                 _fail("case.probes", f"unsupported probe {type(probe).__name__}")
-        for item in expected:
+        for i, item in enumerate(expected):
             if not isinstance(item, ExpectedValue):
                 _fail("case.expected", f"unsupported expected value {type(item).__name__}")
+            _validate_expected_unit(item, i, self.units)
         object.__setattr__(self, "components", components)
         object.__setattr__(self, "probes", probes)
         object.__setattr__(self, "expected", expected)
@@ -699,22 +970,44 @@ class Case:
         if self.mesh is not None and not isinstance(self.mesh, MeshSpec):
             _fail("case.mesh", f"expected MeshSpec or None, got {type(self.mesh).__name__}")
 
+    def _component_to_dict(
+        self, component: Component, length_exp: int, field_exp: int
+    ) -> dict[str, Any]:
+        if isinstance(component, Magnet):
+            return component.to_dict(length_exp10=-length_exp, field_exp10=-field_exp)
+        if isinstance(component, Coil | Permeable | Dipole):
+            return component.to_dict(length_exp10=-length_exp)
+        return component.to_dict()
+
     def to_dict(self) -> dict[str, Any]:
         """Return the case as a JSON-ready dict with keys sorted at every level."""
+        length_exp = SUPPORTED_LENGTH_UNITS[self.units.length]
+        field_exp = SUPPORTED_FIELD_UNITS[self.units.field]
+        force_exp = SUPPORTED_FORCE_UNITS[self.units.force]
+        expected_out = []
+        for i, item in enumerate(self.expected):
+            kind = _validate_expected_unit(item, i, self.units)
+            val_exp = -(field_exp if kind == "field" else force_exp)
+            expected_out.append(item.to_dict(value_exp10=val_exp))
         payload: dict[str, Any] = {
             "schema": SCHEMA,
             "name": self.name,
             "description": self.description,
             "sources": list(self.sources),
             "tolerance": self.tolerance,
-            "components": [component.to_dict() for component in self.components],
-            "probes": [probe.to_dict() for probe in self.probes],
-            "expected": [item.to_dict() for item in self.expected],
+            "units": self.units.to_dict(),
+            "frame": self.frame.to_dict(),
+            "components": [
+                self._component_to_dict(component, length_exp, field_exp)
+                for component in self.components
+            ],
+            "probes": [probe.to_dict(length_exp10=-length_exp) for probe in self.probes],
+            "expected": expected_out,
         }
         if self.manifest is not None:
             payload["manifest"] = self.manifest.to_dict()
         if self.mesh is not None:
-            payload["mesh"] = self.mesh.to_dict()
+            payload["mesh"] = self.mesh.to_dict(length_exp10=-length_exp)
         if self.temperature_c is not None and self.temperature_c != 20.0:
             payload["temperature_c"] = self.temperature_c
         return _sorted(payload)
@@ -723,15 +1016,36 @@ class Case:
     def from_dict(cls, data: Any) -> Case:
         """Build a case from its JSON object; reject unknown keys and missing fields."""
         doc = _mapping(data, "case")
+        if "schema" in doc:
+            schema = _text(doc["schema"], "case.schema")
+            if schema != SCHEMA:
+                _fail("case.schema", f"expected {SCHEMA!r}, got {schema!r}")
+        if "units" not in doc:
+            _fail("case.units", "missing required field 'units'")
+        if "frame" not in doc:
+            _fail("case.frame", "missing required field 'frame'")
         _keys(
             doc,
             "case",
-            ("schema", "name", "description", "sources", "components", "probes", "expected"),
+            (
+                "schema",
+                "name",
+                "description",
+                "sources",
+                "components",
+                "probes",
+                "expected",
+                "units",
+                "frame",
+            ),
             ("tolerance", "manifest", "temperature_c", "mesh"),
         )
-        schema = _text(doc["schema"], "case.schema")
-        if schema != SCHEMA:
-            _fail("case.schema", f"expected {SCHEMA!r}, got {schema!r}")
+        units = UnitSpec.from_dict(doc["units"], "case.units")
+        frame = FrameSpec.from_dict(doc["frame"], "case.frame")
+        length_exp = SUPPORTED_LENGTH_UNITS[units.length]
+        field_exp = SUPPORTED_FIELD_UNITS[units.field]
+        force_exp = SUPPORTED_FORCE_UNITS[units.force]
+
         components = doc["components"]
         probes = doc["probes"]
         expected = doc["expected"]
@@ -751,31 +1065,54 @@ class Case:
         raw_mesh = doc.get("mesh")
         mesh: MeshSpec | None = None
         if raw_mesh is not None:
-            mesh = MeshSpec.from_dict(raw_mesh, "case.mesh")
+            mesh = MeshSpec.from_dict(raw_mesh, "case.mesh", length_exp10=length_exp)
+
+        parsed_expected: list[ExpectedValue] = []
+        for i, item in enumerate(expected):
+            raw_expected = ExpectedValue.from_dict(item, f"case.expected[{i}]")
+            kind = _validate_expected_unit(raw_expected, i, units)
+            val_exp = field_exp if kind == "field" else force_exp
+            if val_exp != 0:
+                raw_expected = ExpectedValue(
+                    check=raw_expected.check,
+                    quantity=raw_expected.quantity,
+                    value=_scale_power10(raw_expected.value, val_exp),
+                    unit=raw_expected.unit,
+                    tolerance=raw_expected.tolerance,
+                    source=raw_expected.source,
+                )
+            parsed_expected.append(raw_expected)
+
         return cls(
             name=doc["name"],
             description=doc["description"],
             sources=tuple(doc["sources"]),
             components=tuple(
-                component_from_dict(item, f"case.components[{i}]")
+                component_from_dict(
+                    item,
+                    f"case.components[{i}]",
+                    length_exp10=length_exp,
+                    field_exp10=field_exp,
+                    length_unit=units.length,
+                )
                 for i, item in enumerate(components)
             ),
             probes=tuple(
-                Probe.from_dict(item, f"case.probes[{i}]") for i, item in enumerate(probes)
+                Probe.from_dict(item, f"case.probes[{i}]", length_exp10=length_exp)
+                for i, item in enumerate(probes)
             ),
-            expected=tuple(
-                ExpectedValue.from_dict(item, f"case.expected[{i}]")
-                for i, item in enumerate(expected)
-            ),
+            expected=tuple(parsed_expected),
             tolerance=doc.get("tolerance"),
             manifest=manifest,
             temperature_c=doc.get("temperature_c"),
             mesh=mesh,
+            units=units,
+            frame=frame,
         )
 
     def to_json(self, indent: int = 2) -> str:
         """Serialise with sorted keys — the on-disk form is deterministic."""
-        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+        return json.dumps(self.to_dict(), indent=indent, sort_keys=True, ensure_ascii=False) + "\n"
 
     @classmethod
     def from_json(cls, text: str) -> Case:

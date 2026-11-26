@@ -207,7 +207,7 @@ def convert_component_role(component: Any, target: str) -> Any:
 
     if raw in ("steel", "permeable", "steel:permeable"):
         raise RoleAssignmentError(
-            f"Cannot assign {label!r} to permeable steel: case schema magwave.case/1 models "
+            f"Cannot assign {label!r} to permeable steel: case schema magwave.case/2 models "
             "free-space sources (magnet, coil, dipole) only; permeable material requires Tier 1 FEM."
         )
 

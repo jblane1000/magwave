@@ -26,6 +26,9 @@
       "value": 1.6e-06
     }
   ],
+  "frame": {
+    "axis": "z"
+  },
   "name": "dipole_axis_Bz",
   "probes": [
     {
@@ -38,10 +41,16 @@
       "quantity": "B"
     }
   ],
-  "schema": "magwave.case/1",
+  "schema": "magwave.case/2",
   "sources": [
     "docs/research/reference_formulas.py (a) dipole_B",
     "docs/research/validation-sources.md (a): Jackson 5.5"
   ],
-  "tolerance": 1e-09
+  "tolerance": 1e-09,
+  "units": {
+    "current": "A",
+    "field": "T",
+    "force": "N",
+    "length": "m"
+  }
 }

@@ -38,6 +38,8 @@ def _case_dict() -> dict:
         "description": "hand-built case for the contract tests",
         "sources": ["unit test"],
         "tolerance": 1e-09,
+        "units": {"length": "m", "field": "T", "current": "A", "force": "N"},
+        "frame": {"axis": "z"},
         "components": [
             {
                 "type": "dipole",
