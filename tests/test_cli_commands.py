@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES_DIR = ROOT / "examples"
 DIPOLE_EXAMPLE = EXAMPLES_DIR / "solve-dipole.json"
 STEEL_EXAMPLE = EXAMPLES_DIR / "steel-cylinder-solenoid-nonlinear.json"
+STEEL_SPHERE_EXAMPLE = EXAMPLES_DIR / "steel-sphere-uniform-field.json"
 CORPUS = {case.name: case for case in load_corpus()}
 
 
@@ -58,7 +59,10 @@ def test_validate_shipped_examples_exit_zero_and_emit_deterministic_json(
     assert main(["validate", str(example_path), "--json", str(report_path)]) == 0
     cap = capsys.readouterr()
     assert cap.err == ""
-    assert cap.out.strip() == "valid: true (schema: magwave.case/2)"
+    assert (
+        cap.out.strip()
+        == "valid: true (schema: magwave.case/2; structural only — no engine checked)"
+    )
 
     text_first = report_path.read_text(encoding="utf-8")
     payload = json.loads(text_first)
@@ -359,6 +363,115 @@ def test_cli_help_lists_new_commands_and_run_exit_codes(
     for command_name in ("validate", "run", "export"):
         assert command_name in help_text
     assert "0 success, 1 case fails to load or validate, 2 engine refuses the case" in help_text
+
+
+def test_run_dry_run_refuses_bad_probe_without_solving_or_writing_artefacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _forbid(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("dry-run must not build a mesh or solve")
+
+    monkeypatch.setattr(Fem2dEngine, "solve", _forbid)
+    monkeypatch.setattr(Fem2dEngine, "_build_mesh_and_load", _forbid)
+
+    doc = json.loads(STEEL_SPHERE_EXAMPLE.read_text(encoding="utf-8"))
+    doc["probes"][0]["point"] = [50.0, 0.0, 0.0]
+    bad_case = tmp_path / "bad_sphere.json"
+    bad_case.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    assert main(["run", str(bad_case), "--engine", "fem2d", "--dry-run"]) == 2
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "E_PROBE_OUTSIDE_DOMAIN" in cap.err
+    assert not (tmp_path / "bad_sphere.results.json").exists()
+    assert not (tmp_path / "bad_sphere.results.csv").exists()
+
+
+def test_run_dry_run_accepts_good_case_without_solving_or_writing_artefacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def _forbid(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("dry-run must not build a mesh or solve")
+
+    monkeypatch.setattr(Fem2dEngine, "solve", _forbid)
+    monkeypatch.setattr(Fem2dEngine, "_build_mesh_and_load", _forbid)
+
+    good_case = _copy_case(STEEL_SPHERE_EXAMPLE, tmp_path / "good_sphere.json")
+    missing_dir = tmp_path / "nonexistent_results_dir"
+
+    assert (
+        main(
+            [
+                "run",
+                str(good_case),
+                "--engine",
+                "fem2d",
+                "--dry-run",
+                "--results-dir",
+                str(missing_dir),
+            ]
+        )
+        == 0
+    )
+    cap = capsys.readouterr()
+    assert cap.err == ""
+    assert "fem2d" in cap.out
+    assert "steel_sphere_uniform_field" in cap.out
+    assert "dry run, nothing was solved" in cap.out
+    assert not (tmp_path / "good_sphere.results.json").exists()
+    assert not (tmp_path / "good_sphere.results.csv").exists()
+
+
+def test_run_without_dry_run_still_writes_both_artefacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    good_case = _copy_case(STEEL_SPHERE_EXAMPLE, tmp_path / "good_sphere.json")
+
+    assert main(["run", str(good_case), "--engine", "fem2d"]) == 0
+    cap = capsys.readouterr()
+    json_path = tmp_path / "good_sphere.results.json"
+    csv_path = tmp_path / "good_sphere.results.csv"
+    assert json_path.is_file()
+    assert csv_path.is_file()
+    assert cap.err.splitlines() == [str(json_path), str(csv_path)]
+    assert "steel_sphere_uniform_field" in cap.out
+
+
+def test_validate_reports_structural_only_and_points_engine_flag_to_run_dry_run(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    good_case = _copy_case(STEEL_SPHERE_EXAMPLE, tmp_path / "good_sphere.json")
+
+    assert main(["validate", str(good_case)]) == 0
+    cap_ok = capsys.readouterr()
+    assert cap_ok.err == ""
+    assert (
+        cap_ok.out.strip()
+        == "valid: true (schema: magwave.case/2; structural only — no engine checked)"
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["validate", str(good_case), "--engine", "fem2d"])
+    assert excinfo.value.code == 2
+    err = capsys.readouterr().err
+    assert "schema only" in err
+    assert "magwave run CASE --engine ID --dry-run" in err
+
+    for subcommand, extra in (
+        ("validate", [str(good_case)]),
+        ("solve", [str(good_case), "--points", "0,0,0"]),
+        ("bench", []),
+    ):
+        with pytest.raises(SystemExit) as bad_dry:
+            main([subcommand, *extra, "--dry-run"])
+        assert bad_dry.value.code == 2
+        assert "--dry-run applies to run only" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------------------

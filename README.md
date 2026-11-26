@@ -149,17 +149,20 @@ python tools/gui_walkthrough.py --case examples/solve-dipole.json --shots /tmp/g
 All CLI commands run headless with no display server (`DISPLAY` unset):
 
 ```bash
-# Validate a case JSON structurally without solving (exits 0 when valid, 1 on errors)
+# Validate a case JSON structurally only (no engine is checked; exits 0 when valid, 1 on errors)
 magwave validate examples/solve-dipole.json [--json report.json]
 
+# Pre-flight whether a specific engine will accept the case without solving or writing artefacts
+magwave run examples/solve-dipole.json --engine fem2d --dry-run
+
 # Load, validate, evaluate the case probes, write .results.json/.results.csv, and print summary
-magwave run examples/solve-dipole.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR]
+magwave run examples/solve-dipole.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR] [--dry-run]
 
 # Sample B on points or a grid and write CSV or JSON to a file or stdout ('-')
 magwave export examples/solve-dipole.json --points "0,0,0.5" [--format csv|json] [--out PATH|-]
 ```
 
-Exit codes for `magwave run`: `0` on success, `1` when the case fails to load or validate, and `2` when the selected engine refuses the case.
+Exit codes for `magwave run`: `0` on success (or with `--dry-run`, the engine would accept the case and nothing was solved), `1` when the case fails to load or validate, and `2` when the selected engine refuses the case.
 
 ## Development
 
