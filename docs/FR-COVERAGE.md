@@ -31,7 +31,7 @@ Column meanings:
 | FR-041 | A case needing steel on Tier 0 exits non-zero and names the capability | `tests/test_fr041_gate.py` (4 tests); also observed by hand when `run --engine magpylib` refused the N42 demag case with `E_UNSUPPORTED_DEMAG_CURVE` and exit 2 | Satisfied |
 | FR-050 | Sampling at points, lines, planes and volumes, exported as CSV and JSON, matching in-app values exactly | `--grid` covers volumes, planes and lines as degenerate axes; `tests/test_solve_cli.py` (7 tests); `export` byte-identical to `solve` proven in `tests/test_cli_commands.py` and by hand on 2026-11-25 | Satisfied |
 | FR-060 | `run`, `validate`, `export`, `bench` all work headless in CI with no display | `tests/test_cli_commands.py` (15 tests); verified by hand with `DISPLAY` unset: `validate` reports every defect at once, `run` writes the artefact and uses exit codes 0/1/2, `export --out -` matches `solve` byte for byte | Satisfied |
-| FR-061 | Desktop GUI: open case, assign roles, run, view, export | `tests/test_gui_walkthrough.py` with `tools/gui_walkthrough.py`, offscreen Qt, clicks the real Run button | Satisfied, as an automated gate. The human "new user from the README alone" part is item 9.5 below |
+| FR-061 | Desktop GUI: open case, assign roles, run, view, export | `tests/test_gui_walkthrough.py` with `tools/gui_walkthrough.py`, offscreen Qt, clicks the real Run button | Satisfied as an automated gate. Its v0.1 acceptance text now ends at "export report", because slice planes are FR-051 and are not implemented in v1. The human "new user from the README alone" part is item 9.5 |
 | FR-062 | Python API importable without Qt | `tests/test_cad_import.py` asserts that importing `magwave` and `magwave.cad` loads none of OCP, trimesh or PySide6; `tests/test_cli_commands.py` bans PySide6, pyvista and matplotlib on the CLI paths | Satisfied |
 | FR-070 | Benchmark suite runs on every push; a 1 % perturbation to any expected value fails it | `tests/test_benchmarks.py` (15 tests); `magwave bench` runs in CI on Python 3.12 and 3.13 and on the `cad` job | Satisfied |
 
@@ -87,9 +87,8 @@ its Ubuntu package. After them, the same bare-image run installs the README's se
 Status: Satisfied for the fresh-VM leg once #37 merges. The second-person leg is still open, and so
 is the wording question below.
 
-Note for the v0.1 decision: FR-061's acceptance text asks a new user to complete "import, assign, run,
-slice" from the README, but slice planes are not implemented in v1 and the README says so. Either the
-acceptance text is reworded for v0.1 or the FR is split.
+Resolved 2026-11-25: FR-061's acceptance text now reads "import STEP, assign, run, export report" for
+v0.1, with slice planes left to FR-051. The PRD no longer promises a step this release cannot perform.
 
 ## What stands between this page and a v0.1 tag
 
