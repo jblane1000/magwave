@@ -64,6 +64,7 @@ E_ACCURACY_UNREACHABLE = "E_ACCURACY_UNREACHABLE"
 E_PROBE_OUTSIDE_DOMAIN = "E_PROBE_OUTSIDE_DOMAIN"
 E_NOT_CONVERGED = "E_NOT_CONVERGED"
 E_MESH_NODE_BUDGET = "E_MESH_NODE_BUDGET"
+E_UNSUPPORTED_OFF_AXIS_PERMEABLE = "E_UNSUPPORTED_OFF_AXIS_PERMEABLE"
 
 _AXIS_TOL = 1e-12
 
@@ -383,6 +384,19 @@ class Fem2dEngine:
                             E_UNSUPPORTED_GEOMETRY,
                             f"{case.name}: {label} is a {component.kind!r} permeable body; "
                             "fem2d supports axisymmetric 'sphere' and 'cylinder' bodies only",
+                            "error",
+                        )
+                    )
+                    continue
+                rc = math.hypot(component.center[0], component.center[1])
+                if rc > _AXIS_TOL:
+                    problems.append(
+                        Problem(
+                            E_UNSUPPORTED_OFF_AXIS_PERMEABLE,
+                            f"{case.name}: {label} is centred at {component.center}, off the z "
+                            "symmetry axis (r > 0); the axisymmetric A_phi formulation can only "
+                            "represent bodies on the axis — place the body on the axis "
+                            "(x = y = 0) or wait for CAD meshing (M7); nothing was solved.",
                             "error",
                         )
                     )

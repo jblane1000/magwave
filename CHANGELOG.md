@@ -6,6 +6,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- **Refuse off-axis `permeable` bodies in Tier 1 (`E_UNSUPPORTED_OFF_AXIS_PERMEABLE`)**: `Fem2dEngine.validate()` now rejects any `permeable` component with `hypot(x, y) > 1e-12` before solving or writing results artefacts, rather than silently revolving it into an off-axis torus in axisymmetric `A_phi`.
+
 ## [0.1.0] - 2026-11-25
 
 First published release. Tier 0 analytic solver, Tier 1 axisymmetric finite-element solver with

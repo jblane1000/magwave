@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from magwave.cases import Case, ExpectedValue, Permeable, Probe, UniformField
+from magwave.cli import main
 from magwave.engines import EngineError, Fem2dEngine
+from magwave.fem2d import E_UNSUPPORTED_OFF_AXIS_PERMEABLE
 from magwave.fem2d.assembly import element_geometry
 from magwave.units import MU0
+
+ROOT = Path(__file__).resolve().parents[1]
 
 RADIUS = 0.010
 H0 = 1.0e4
@@ -299,3 +305,84 @@ def test_overlap_and_block_are_rejected() -> None:
     block_errors = [p for p in engine.validate(block_case) if p.is_error]
     assert len(block_errors) == 1
     assert block_errors[0].code == "E_UNSUPPORTED_GEOMETRY"
+
+
+def test_off_axis_permeable_is_rejected_by_validate() -> None:
+    base = _sphere_case(mu_r=MU_R_SPHERE)
+    off_axis_sphere = replace(
+        base,
+        name="off_axis_permeable_sphere",
+        components=(
+            replace(base.components[0], center=(0.05, 0.0, 0.0)),
+            base.components[1],
+        ),
+    )
+    engine = Fem2dEngine()
+    errors = [p for p in engine.validate(off_axis_sphere) if p.is_error]
+    assert len(errors) == 1
+    assert errors[0].code == E_UNSUPPORTED_OFF_AXIS_PERMEABLE
+    assert "(0.05" in errors[0].message
+    assert "steel_sphere" in errors[0].message
+    assert errors[0].message.endswith("nothing was solved.")
+
+    with pytest.raises(EngineError) as excinfo:
+        engine.solve(off_axis_sphere)
+    assert [p.code for p in excinfo.value.problems] == [E_UNSUPPORTED_OFF_AXIS_PERMEABLE]
+
+    off_axis_cyl = replace(
+        base,
+        name="off_axis_permeable_cylinder",
+        components=(
+            Permeable(
+                kind="cylinder",
+                dims={"radius": 0.01, "length": 0.02},
+                center=(0.0, -0.02, 0.01),
+                material="steel-team20",
+                mu_r=100.0,
+                name="steel_cyl",
+            ),
+            base.components[1],
+        ),
+    )
+    cyl_errors = [p for p in engine.validate(off_axis_cyl) if p.is_error]
+    assert len(cyl_errors) == 1
+    assert cyl_errors[0].code == E_UNSUPPORTED_OFF_AXIS_PERMEABLE
+
+
+def test_off_axis_permeable_cli_refuses_without_writing_artefacts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    example_doc = json.loads(
+        (ROOT / "examples" / "steel-sphere-uniform-field.json").read_text(encoding="utf-8")
+    )
+    example_doc["components"][0]["center"] = [0.05, 0.0, 0.0]
+    case_path = tmp_path / "off_axis_sphere.json"
+    case_path.write_text(json.dumps(example_doc, indent=2), encoding="utf-8")
+
+    rc = main(["solve", str(case_path), "--engine", "fem2d"])
+    captured = capsys.readouterr()
+
+    assert rc != 0
+    assert captured.out == ""
+    assert E_UNSUPPORTED_OFF_AXIS_PERMEABLE in captured.err
+    assert not (tmp_path / "off_axis_sphere.results.json").exists()
+    assert not (tmp_path / "off_axis_sphere.results.csv").exists()
+
+
+def test_on_axis_permeable_example_still_validates_and_solves() -> None:
+    case = Case.from_json(
+        (ROOT / "examples" / "steel-sphere-uniform-field.json").read_text(encoding="utf-8")
+    )
+    engine = Fem2dEngine()
+    assert engine.validate(case) == []
+    result = engine.solve(case)
+    assert result.values()[0] == pytest.approx(0.0372432143989124, rel=1e-12)
+
+    z_shifted = replace(
+        case,
+        components=(
+            replace(case.components[0], center=(0.0, 0.0, 0.02)),
+            case.components[1],
+        ),
+    )
+    assert engine.validate(z_shifted) == []
