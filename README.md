@@ -93,7 +93,7 @@ This walkthrough uses the shipped point-dipole example (`examples/solve-dipole.j
    In the window you will see:
    - **Case**: `dipole_axis_Bz` (`examples/solve-dipole.json`)
    - **Provenance (Engine & Rung)**: `Engine ID: magpylib`, the installed `Engine Version`, `Rung: second-code`, and the solver `Method`
-   - **Components / Role Assignment**: `m1` (`dipole`, `moment=(0.0, 0.0, 1.0) A m^2`) — switching a component's kind works where `magwave.case/1` permits it (e.g. magnet `cuboid` ↔ `cylinder`, coil `loop` ↔ `solenoid`); unsupported assignments such as `steel (permeable)` report a blocking explanation in **Validation & Solver Problems**
+   - **Components / Role Assignment**: `m1` (`dipole`, `moment=(0.0, 0.0, 1.0) A m^2`) — switching a component's kind works where `magwave.case/2` permits it (e.g. magnet `cuboid` ↔ `cylinder`, coil `loop` ↔ `solenoid`); unsupported assignments such as `steel (permeable)` report a blocking explanation in **Validation & Solver Problems**
    - **Probes**: `probe #0` at `(0.0, 0.0, 0.5)` m requesting `B`, component `z` (`T`)
    - **Expected Values**: check `dipole_B`, `Bz = 1.6e-06 T`, tolerance `1e-09`
 

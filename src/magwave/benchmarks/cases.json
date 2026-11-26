@@ -28,6 +28,9 @@
           "value": 1.6e-06
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "dipole_axis_Bz",
       "probes": [
         {
@@ -40,12 +43,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (a) dipole_B",
         "docs/research/validation-sources.md (a): Jackson 5.5"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -75,6 +84,9 @@
           "value": 1.152e-06
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "dipole_offaxis_Bx",
       "probes": [
         {
@@ -87,12 +99,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (a) dipole_B",
         "docs/research/validation-sources.md (a)"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -122,6 +140,9 @@
           "value": 7.36e-07
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "dipole_offaxis_Bz",
       "probes": [
         {
@@ -134,12 +155,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (a) dipole_B",
         "docs/research/validation-sources.md (a)"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -170,6 +197,9 @@
           "value": 6.283185307179586e-07
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "loop_axis_Bz",
       "probes": [
         {
@@ -182,12 +212,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (b) loop_B on-axis branch",
         "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
       ],
-      "tolerance": 1e-10
+      "tolerance": 1e-10,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -218,6 +254,9 @@
           "value": 5.106799344289345e-07
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "loop_offaxis_Bz",
       "probes": [
         {
@@ -230,12 +269,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (b) loop_B",
         "docs/research/validation-sources.md (b): verified 5.7e-14 vs a 60 000-segment Biot-Savart reference"
       ],
-      "tolerance": 1e-10
+      "tolerance": 1e-10,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -266,6 +311,9 @@
           "value": 8.611335230253824e-08
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "loop_offaxis_Brho",
       "probes": [
         {
@@ -278,12 +326,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (b) loop_B",
         "docs/research/validation-sources.md (b)"
       ],
-      "tolerance": 1e-10
+      "tolerance": 1e-10,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -316,6 +370,9 @@
           "value": 0.00011239703569665162
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "thin_solenoid_axis_Bz",
       "probes": [
         {
@@ -328,12 +385,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (c) thin_solenoid_Bz, check 'thin solenoid centre field'",
         "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
       ],
-      "tolerance": 1e-12
+      "tolerance": 1e-12,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -366,6 +429,9 @@
           "value": 0.8966736445247395
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "thick_solenoid_axis_Bz",
       "probes": [
         {
@@ -378,12 +444,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (c) thick_solenoid_Bz vs _thick_loopsum",
         "docs/research/validation-sources.md (c): 60-slice ring sum, 1.6e-6 relative"
       ],
-      "tolerance": 0.0001
+      "tolerance": 0.0001,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -420,6 +492,9 @@
           "value": 0.01837860868280891
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cuboid_axis_Bz",
       "probes": [
         {
@@ -432,12 +507,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
         "docs/research/validation-sources.md (d): Engel-Herbert & Hesjedal 2005"
       ],
-      "tolerance": 1e-06
+      "tolerance": 1e-06,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -474,6 +555,9 @@
           "value": 0.021946891344328204
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cuboid_transverse_Bx",
       "probes": [
         {
@@ -486,12 +570,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
         "docs/research/validation-sources.md (d)"
       ],
-      "tolerance": 1e-06
+      "tolerance": 1e-06,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -528,6 +618,9 @@
           "value": 0.7005010116178249
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cuboid_interior_Bz",
       "probes": [
         {
@@ -540,12 +633,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (d) check 'cuboid interior Bz'",
         "docs/research/validation-sources.md (d): atan2 branch carries the jump"
       ],
-      "tolerance": 1e-05
+      "tolerance": 1e-05,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -581,6 +680,9 @@
           "value": 0.7108612701053386
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cylinder_axis_Bz",
       "probes": [
         {
@@ -593,12 +695,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (e) cylinder_Bz_axis and check 'cylinder on-axis (z=0)'",
         "docs/research/validation-sources.md (e): Derby & Olbert 2010; Caciagli 2018"
       ],
-      "tolerance": 1e-12
+      "tolerance": 1e-12,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -634,6 +742,9 @@
           "value": 1.0
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "halbach_bore_B",
       "probes": [
         {
@@ -646,12 +757,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (f) halbach_bore_ideal and the 2-D bound-current verification",
         "docs/research/validation-sources.md (f): Halbach 1980; Bjork 2008"
       ],
-      "tolerance": 0.003
+      "tolerance": 0.003,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -707,6 +824,9 @@
           "value": 4.3518217061443674e-05
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "force_dipole_coaxial_far",
       "probes": [
         {
@@ -719,12 +839,18 @@
           "quantity": "F"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (g) check 'exact face-pair force, far limit g=20L'",
         "docs/research/validation-sources.md (g): dipole valid within 2 % only for d >= ~10 L"
       ],
-      "tolerance": 0.01
+      "tolerance": 0.01,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -780,6 +906,9 @@
           "value": 0.006762088510387287
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "force_pointpole_g5L",
       "probes": [
         {
@@ -792,12 +921,18 @@
           "quantity": "F"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (g) check 'exact force g=5L vs point-pole'",
         "docs/research/validation-sources.md (g): point-pole valid within 2 % for g >= 3 L"
       ],
-      "tolerance": 0.02
+      "tolerance": 0.02,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -827,6 +962,9 @@
           "value": 6.399999999393158e-08
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "dipole_tilted_Bx",
       "probes": [
         {
@@ -839,12 +977,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (a) dipole_B vs dipole_B_fd",
         "docs/research/validation-sources.md (a): Jackson 5.5"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -875,6 +1019,9 @@
           "value": -8.611335230253812e-08
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "loop_offaxis_negz_By",
       "probes": [
         {
@@ -887,12 +1034,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (b) loop_B vs loop_B_numeric",
         "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
       ],
-      "tolerance": 1e-10
+      "tolerance": 1e-10,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -923,6 +1076,9 @@
           "value": 1.3745696733573026e-06
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "loop_near_wire_Bz",
       "probes": [
         {
@@ -935,12 +1091,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (b) loop_B vs loop_B_numeric",
         "docs/research/validation-sources.md (b): NASA/TM-2013-217919"
       ],
-      "tolerance": 1e-10
+      "tolerance": 1e-10,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -973,6 +1135,9 @@
           "value": 9.92224932578276e-05
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "thin_solenoid_offcentre_Bz",
       "probes": [
         {
@@ -985,12 +1150,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (c) thin_solenoid_Bz vs _thin_loopsum",
         "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
       ],
-      "tolerance": 1e-08
+      "tolerance": 1e-08,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1023,6 +1194,9 @@
           "value": 1.7182871503390225e-05
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "thin_solenoid_outside_Bz",
       "probes": [
         {
@@ -1035,12 +1209,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (c) thin_solenoid_Bz vs _thin_loopsum",
         "docs/research/validation-sources.md (c): Garrett 1951; Derby & Olbert 2010"
       ],
-      "tolerance": 1e-08
+      "tolerance": 1e-08,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1073,6 +1253,9 @@
           "value": 0.24945774365109205
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "thick_solenoid_outside_Bz",
       "probes": [
         {
@@ -1085,12 +1268,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (c) thick_solenoid_Bz vs _thick_loopsum",
         "docs/research/validation-sources.md (c): 60-slice ring sum at z = 1.6 m, 1.43e-5 relative"
       ],
-      "tolerance": 0.0001
+      "tolerance": 0.0001,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1126,6 +1315,9 @@
           "value": 0.06508055644195979
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cylinder_axis_outside_Bz",
       "probes": [
         {
@@ -1138,12 +1330,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (e) cylinder_Bz_axis vs cylinder_B_loopsuper",
         "docs/research/validation-sources.md (e): Derby & Olbert 2010; Caciagli 2018"
       ],
-      "tolerance": 1e-08
+      "tolerance": 1e-08,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1180,6 +1378,9 @@
           "value": 0.02194687640429577
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cuboid_transverse_Bz",
       "probes": [
         {
@@ -1192,12 +1393,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (d) cuboid_B vs cuboid_B_numeric",
         "docs/research/validation-sources.md (d): Engel-Herbert & Hesjedal 2005"
       ],
-      "tolerance": 1e-06
+      "tolerance": 1e-06,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1241,6 +1448,9 @@
           "value": 3.7037037037353535e-05
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "force_dipoles_transverse",
       "probes": [
         {
@@ -1253,12 +1463,18 @@
           "quantity": "F"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (h) F_dipoles_general vs F_dipoles_fd",
         "docs/research/validation-sources.md (h): Jackson 5.5 / Lehner p. 309"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1302,6 +1518,9 @@
           "value": 5.240784322526512e-05
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "force_dipoles_oblique",
       "probes": [
         {
@@ -1314,12 +1533,18 @@
           "quantity": "F"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (h) F_dipoles_general vs F_dipoles_fd",
         "docs/research/validation-sources.md (h): Jackson 5.5 / Lehner p. 309"
       ],
-      "tolerance": 1e-09
+      "tolerance": 1e-09,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1355,6 +1580,9 @@
           "value": 0.04596499745507679
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cylinder_offaxis_Brho",
       "probes": [
         {
@@ -1367,12 +1595,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (e) cylinder_B vs cylinder_B_loopsuper and cylinder_sheet_numeric",
         "docs/research/validation-sources.md (e): Derby & Olbert 2010"
       ],
-      "tolerance": 1e-06
+      "tolerance": 1e-06,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     },
     {
       "components": [
@@ -1408,6 +1642,9 @@
           "value": 0.7369529459679288
         }
       ],
+      "frame": {
+        "axis": "z"
+      },
       "name": "cylinder_offaxis_Bz",
       "probes": [
         {
@@ -1420,12 +1657,18 @@
           "quantity": "B"
         }
       ],
-      "schema": "magwave.case/1",
+      "schema": "magwave.case/2",
       "sources": [
         "docs/research/reference_formulas.py (e) cylinder_B vs cylinder_B_loopsuper and cylinder_sheet_numeric",
         "docs/research/validation-sources.md (e): Derby & Olbert 2010"
       ],
-      "tolerance": 1e-06
+      "tolerance": 1e-06,
+      "units": {
+        "current": "A",
+        "field": "T",
+        "force": "N",
+        "length": "m"
+      }
     }
   ],
   "schema": "magwave.benchmarks/1"

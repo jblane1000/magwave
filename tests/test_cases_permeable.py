@@ -69,14 +69,14 @@ def test_schema_files_still_load_unchanged() -> None:
     for path in example_paths:
         raw_text = path.read_text(encoding="utf-8")
         raw_obj = json.loads(raw_text)
-        assert raw_obj["schema"] == SCHEMA == "magwave.case/1"
+        assert raw_obj["schema"] == SCHEMA == "magwave.case/2"
         loaded = Case.from_json(raw_text)
         assert json.loads(loaded.to_json()) == raw_obj
 
     corpus_path = ROOT / "src" / "magwave" / "benchmarks" / "cases.json"
     corpus_obj = json.loads(corpus_path.read_text(encoding="utf-8"))
     for raw_case in corpus_obj["cases"]:
-        assert raw_case["schema"] == SCHEMA == "magwave.case/1"
+        assert raw_case["schema"] == SCHEMA == "magwave.case/2"
         loaded = Case.from_dict(raw_case)
         assert json.loads(loaded.to_json()) == raw_case
 

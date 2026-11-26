@@ -44,6 +44,9 @@
       "value": 0.143836
     }
   ],
+  "frame": {
+    "axis": "z"
+  },
   "mesh": {
     "element_size": 0.001
   },
@@ -59,10 +62,16 @@
       "quantity": "B"
     }
   ],
-  "schema": "magwave.case/1",
+  "schema": "magwave.case/2",
   "sources": [
     "Compumag TEAM 20 B-H table (magwave.materials v1 steel-team20, 38 points, Ms = 2.16 T)",
     "Elmer MagnetoDynamics2D v9.0 second-code nonlinear cross-comparison (tools/elmer_permeable.py)"
   ],
-  "tolerance": 0.03
+  "tolerance": 0.03,
+  "units": {
+    "current": "A",
+    "field": "T",
+    "force": "N",
+    "length": "m"
+  }
 }

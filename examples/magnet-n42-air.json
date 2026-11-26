@@ -40,6 +40,9 @@
       "value": 0.04871809723852616
     }
   ],
+  "frame": {
+    "axis": "z"
+  },
   "name": "magnet_n42_air",
   "probes": [
     {
@@ -61,9 +64,15 @@
       "quantity": "B"
     }
   ],
-  "schema": "magwave.case/1",
+  "schema": "magwave.case/2",
   "sources": [
     "Arnold N42 grade datasheet values in docs/research/materials-bh-data.md §4.1 (magwave.magnets v1 N42-20C)"
   ],
-  "tolerance": 0.03
+  "tolerance": 0.03,
+  "units": {
+    "current": "A",
+    "field": "T",
+    "force": "N",
+    "length": "m"
+  }
 }

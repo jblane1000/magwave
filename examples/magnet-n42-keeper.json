@@ -62,6 +62,9 @@
       "value": 1.0655571548165717
     }
   ],
+  "frame": {
+    "axis": "z"
+  },
   "name": "magnet_n42_keeper",
   "probes": [
     {
@@ -74,10 +77,16 @@
       "quantity": "B"
     }
   ],
-  "schema": "magwave.case/1",
+  "schema": "magwave.case/2",
   "sources": [
     "Arnold N42 grade datasheet values in docs/research/materials-bh-data.md §4.1 (magwave.magnets v1 N42-20C)",
     "Compumag TEAM 20 steel B-H table (magwave.materials v1 steel-team20)"
   ],
-  "tolerance": 0.03
+  "tolerance": 0.03,
+  "units": {
+    "current": "A",
+    "field": "T",
+    "force": "N",
+    "length": "m"
+  }
 }

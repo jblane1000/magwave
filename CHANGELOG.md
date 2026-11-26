@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Case unit system and frame declaration (`magwave.case/2`, FR-003)**: bumped the case schema
+  from `magwave.case/1` to `magwave.case/2` (no dual reader) with required `units` (`UnitSpec`:
+  `length` in `m`/`mm`, `field` in `T`/`mT`, `current` in `A`, `force` in `N`/`mN`) and
+  `frame` (`FrameSpec`: `axis` in `z`, optional `datum_face` omitted when empty); added exact
+  power-of-ten boundary conversion via `Decimal.scaleb` into internal SI (`m`, `T`, `A`, `N`) on
+  load and back on serialisation for byte-identical round-trips (`coil.current`,
+  `uniform_field.h0`, and `dipole.moment` remain SI); refused `magwave.case/1`, unsupported units
+  (including inches), `frame.axis` `x`/`y`, and `expected[i].unit` contradictions with `CaseError`
+  naming exact JSON paths; migrated all five `examples/*.json` files and all 27 cases in
+  `src/magwave/benchmarks/cases.json` with zero numeric changes (`docs/adr/0012-units-and-frame-declaration.md`).
 - **Results artefact with provenance (FR-002)**: added `magwave.results.write_results` and wired
   both Tier 0 and Tier 1 `magwave solve` paths (with optional `--results-dir DIR`) to emit
   deterministic `<stem>.results.json` (`magwave.results/1`) and `<stem>.results.csv` files
