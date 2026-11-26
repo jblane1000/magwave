@@ -40,7 +40,7 @@ def test_cli_version_flag_exits_cleanly() -> None:
 
 
 def test_unknown_command_fails_loudly() -> None:
-    assert main(["run"]) == 2
+    assert main(["not-a-command"]) == 2
 
 
 def test_every_module_imports() -> None:

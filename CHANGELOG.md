@@ -8,6 +8,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Headless CLI commands `validate`, `run`, and `export` (FR-060, FR-002, FR-050)**:
+  - `magwave validate CASE.json [--json PATH]` performs multi-error structural validation of
+    `magwave.case/2` documents (schema, required/unknown keys, units/frame declarations, component
+    dims and materials, probes, expected value units, tightest-tolerance gate, manifest roles,
+    and mesh spec) without solving or importing GUI/CAD packages, reporting all defects on stderr
+    (exit `1`) or `valid: true` (exit `0`).
+  - `magwave run CASE.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR]`
+    loads, validates, evaluates the case's own probes, writes deterministic FR-002 `.results.json`
+    and `.results.csv` provenance artefacts, and prints a concise summary (`0` success, `1`
+    load/validation failure, `2` engine refusal).
+  - `magwave export CASE.json (--points SPEC | --grid SPEC) [--out PATH|-] [--format csv|json]`
+    samples `B` with Tier 0 using the existing samplers and formatters and writes to `PATH` or
+    stdout (`-`), refusing unwritable `--out` paths with `E_OUTPUT_PATH` (exit `1`) before solving.
 - **Case unit system and frame declaration (`magwave.case/2`, FR-003)**: bumped the case schema
   from `magwave.case/1` to `magwave.case/2` (no dual reader) with required `units` (`UnitSpec`:
   `length` in `m`/`mm`, `field` in `T`/`mT`, `current` in `A`, `force` in `N`/`mN`) and

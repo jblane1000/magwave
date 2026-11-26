@@ -123,6 +123,23 @@ python tools/gui_walkthrough.py --case examples/solve-dipole.json --shots /tmp/g
 - **`PASS` / `FAIL` and exit status:** prints a single `PASS:` or `FAIL:` summary line comparing the solved value read from `probes_table` against the case's expected value and tolerance. Exit status `0` means the **Run** button was enabled and every solved probe was within tolerance; non-zero means **Run** was missing/disabled, no solved value appeared, or a probe exceeded tolerance.
 - **Qt offscreen stderr noise:** `This plugin does not support propagateSizeHints()` on stderr comes from Qt's `offscreen` platform plugin and is harmless, not a failure.
 
+## CLI usage
+
+All CLI commands run headless with no display server (`DISPLAY` unset):
+
+```bash
+# Validate a case JSON structurally without solving (exits 0 when valid, 1 on errors)
+magwave validate examples/solve-dipole.json [--json report.json]
+
+# Load, validate, evaluate the case probes, write .results.json/.results.csv, and print summary
+magwave run examples/solve-dipole.json [--engine magpylib|fem2d] [--element-size METRES] [--results-dir DIR]
+
+# Sample B on points or a grid and write CSV or JSON to a file or stdout ('-')
+magwave export examples/solve-dipole.json --points "0,0,0.5" [--format csv|json] [--out PATH|-]
+```
+
+Exit codes for `magwave run`: `0` on success, `1` when the case fails to load or validate, and `2` when the selected engine refuses the case.
+
 ## Development
 
 ```bash
