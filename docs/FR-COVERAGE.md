@@ -67,10 +67,29 @@ Status: Satisfied.
 
 ## 9.5 First-run walkthrough executed by a second person or fresh VM
 
-Not done. The automated offscreen walkthrough behind FR-061 is not a substitute: it drives the widget
-tree with knowledge of the case name and tolerances that a first-time user would not have.
+A fresh-VM equivalent was run on 2026-11-25: a clean `ubuntu:24.04` container, `git clone` from
+GitHub, and nothing but the README. It failed three times before it passed, and each failure was a
+real first-run defect:
 
-Status: Not satisfied. Needs either a second person or a clean VM following the README.
+1. A bare Ubuntu 24.04 image has no `git`, `python3`, `pip3` or compiler. The Quickstart started at
+   `git clone` and listed no prerequisites.
+2. With the `[gui]` extra correctly installed, the GUI reported that the extra was missing, because
+   `require_gui()` turned every `ImportError` into that one message. The real error was
+   `libGL.so.1: cannot open shared object file`.
+3. Installing the five packages CI installs was still not enough on a minimal image; the next failure
+   was `libglib-2.0.so.0`.
+
+The fixes are in PR #37: a Prerequisites section with the verified package list, and a
+`require_gui()` that separates "extra absent" from "system library missing" and names the library and
+its Ubuntu package. After them, the same bare-image run installs the README's seven packages and
+`tools/gui_walkthrough.py` prints PASS with `1.6000000000000004e-06` against `1.6e-06`, exit 0.
+
+Status: Satisfied for the fresh-VM leg once #37 merges. The second-person leg is still open, and so
+is the wording question below.
+
+Note for the v0.1 decision: FR-061's acceptance text asks a new user to complete "import, assign, run,
+slice" from the README, but slice planes are not implemented in v1 and the README says so. Either the
+acceptance text is reworded for v0.1 or the FR is split.
 
 ## What stands between this page and a v0.1 tag
 
